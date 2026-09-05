@@ -5,6 +5,10 @@ import pytest
 import pdf_inspector
 
 FIXTURES_DIR = os.path.join(os.path.dirname(__file__), "fixtures")
+requires_legacy_fixtures = pytest.mark.skipif(
+    not os.path.exists(os.path.join(FIXTURES_DIR, "thermo-freon12.pdf")),
+    reason="legacy PDF fixtures are not stored in Git",
+)
 
 
 def fixture_path(name: str) -> str:
@@ -21,6 +25,7 @@ def fixture_bytes(name: str) -> bytes:
 # ---------------------------------------------------------------------------
 
 
+@requires_legacy_fixtures
 class TestProcessPdf:
     def test_basic(self):
         result = pdf_inspector.process_pdf(fixture_path("thermo-freon12.pdf"))
@@ -64,6 +69,7 @@ class TestProcessPdf:
 # ---------------------------------------------------------------------------
 
 
+@requires_legacy_fixtures
 class TestProcessPdfBytes:
     def test_basic(self):
         data = fixture_bytes("thermo-freon12.pdf")
@@ -82,6 +88,7 @@ class TestProcessPdfBytes:
 # ---------------------------------------------------------------------------
 
 
+@requires_legacy_fixtures
 class TestDetectPdf:
     def test_detect_file(self):
         result = pdf_inspector.detect_pdf(fixture_path("thermo-freon12.pdf"))
@@ -101,6 +108,7 @@ class TestDetectPdf:
 # ---------------------------------------------------------------------------
 
 
+@requires_legacy_fixtures
 class TestClassifyPdf:
     def test_classify_file(self):
         result = pdf_inspector.classify_pdf(fixture_path("thermo-freon12.pdf"))
@@ -135,6 +143,7 @@ class TestClassifyPdf:
 # ---------------------------------------------------------------------------
 
 
+@requires_legacy_fixtures
 class TestExtractText:
     def test_basic(self):
         text = pdf_inspector.extract_text(fixture_path("thermo-freon12.pdf"))
@@ -158,6 +167,7 @@ class TestExtractText:
 # ---------------------------------------------------------------------------
 
 
+@requires_legacy_fixtures
 class TestExtractTextWithPositions:
     def test_basic(self):
         items = pdf_inspector.extract_text_with_positions(
@@ -209,6 +219,7 @@ class TestExtractTextWithPositions:
 # ---------------------------------------------------------------------------
 
 
+@requires_legacy_fixtures
 class TestExtractTextInRegions:
     def test_file(self):
         results = pdf_inspector.extract_text_in_regions(
@@ -275,6 +286,7 @@ class TestExtractTextInRegions:
 # ---------------------------------------------------------------------------
 
 
+@requires_legacy_fixtures
 class TestExtractPagesMarkdown:
     def test_default_returns_all_pages(self):
         result = pdf_inspector.extract_pages_markdown(

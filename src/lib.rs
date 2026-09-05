@@ -1310,7 +1310,8 @@ fn crop_px_bbox_is_plausible(
         && bbox_px[3] <= crop_h + slack
 }
 
-#[cfg(test)]
+// These regressions require the legacy PDFs that are no longer stored in Git.
+#[cfg(all(test, feature = "legacy-pdf-fixtures"))]
 mod vector_grid_tests {
     use super::crop_px_bbox_is_plausible;
 

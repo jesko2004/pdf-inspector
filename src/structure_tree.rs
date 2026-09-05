@@ -1177,6 +1177,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-pdf-fixtures")]
     fn test_bare_name_struct_types() {
         // Some PDF generators (e.g. fpdf2) write /S Code instead of /S /Code.
         // lopdf silently drops objects with invalid tokens. Our pre-processor
@@ -1205,6 +1206,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(feature = "legacy-pdf-fixtures")]
     fn test_parse_real_tagged_pdf() {
         let doc = Document::load("tests/fixtures/2013-app2.pdf").unwrap();
         let tree = StructTree::from_doc(&doc);

@@ -22,7 +22,6 @@ Thumbs.db
 
 # Test files
 *.pdf
-!tests/fixtures/*.pdf
 
 # Build cache
 **/*.rs.bk

@@ -7,7 +7,7 @@ Fast PDF text extraction to structured Markdown. CLI binary: `pdf2md`. Detection
 ```bash
 cargo fmt                                    # format
 cargo clippy -- -D warnings                  # lint (enforced, zero warnings)
-cargo test                                   # unit + integration tests (267+ unit, 73+ integration)
+cargo test                                   # unit + synthetic integration tests
 cargo build --release                        # release binary for benchmarks
 ```
 
@@ -60,7 +60,9 @@ src/
 ## Testing
 
 - **Unit tests**: inline `#[cfg(test)] mod tests` in each module with synthetic data.
-- **Integration tests**: `tests/integration_tests.rs` with fixture PDFs in `tests/fixtures/`.
+- **Integration tests**: `tests/integration_tests.rs` uses synthetic PDFs by default.
+- **Local PDF fixtures**: put user-supplied PDFs in `tests/fixtures/`; `*.pdf` is ignored by Git.
+- **Legacy fixture tests**: run only with `cargo test --features legacy-pdf-fixtures` when the historical PDFs are available locally.
 - **Regression suite**: sibling repo `pdf-evals` with 179+ snapshot PDFs. Run `cargo build --release` then `bench.py test` in that repo before committing.
 
 ## Debugging

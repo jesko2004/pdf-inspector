@@ -1060,31 +1060,37 @@ fn assert_snapshot(fixture: &str) {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_snapshot_nexo_price_en() {
     assert_snapshot("nexo-price-en");
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_snapshot_thermo_freon12() {
     assert_snapshot("thermo-freon12");
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_snapshot_td9264() {
     assert_snapshot("td9264");
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_snapshot_p1244() {
     assert_snapshot("p1244-1996");
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_snapshot_real_estate_pricing() {
     assert_snapshot("real-estate-pricing");
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_snapshot_2013_app2() {
     assert_snapshot("2013-app2");
 }
@@ -1161,6 +1167,7 @@ startxref
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_firecrawl_tagged_pdf_struct_tree() {
     use lopdf::Document;
     use pdf_inspector::structure_tree::{StructRole, StructTree};
@@ -1197,6 +1204,7 @@ fn test_firecrawl_tagged_pdf_struct_tree() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_identity_h_no_tounicode_suppresses_garbage() {
     // shinagawa_identity_h.pdf uses YuGothic with Identity-H encoding and no
     // usable ToUnicode CMap. The raw CID bytes (e.g. 0x08 0x37, 0x0E 0x0F)
@@ -1250,6 +1258,7 @@ fn test_identity_h_no_tounicode_suppresses_garbage() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_rotated_table_layout_correction() {
     // tnagriculture_06_12.pdf has landscape content in a portrait page via
     // a 90° CCW text matrix [0, b, -b, 0, tx, ty].  Without rotation
@@ -1331,6 +1340,7 @@ fn word_overlap_ratio(a: &str, b: &str) -> f64 {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_regions_mem_basic_text_pdf() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let result = process_pdf_mem(&buf).unwrap();
@@ -1351,6 +1361,7 @@ fn test_extract_regions_mem_basic_text_pdf() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_regions_mem_identity_h_needs_ocr() {
     let buf = std::fs::read("tests/fixtures/shinagawa_identity_h.pdf").unwrap();
     let regions =
@@ -1368,6 +1379,7 @@ fn test_extract_regions_mem_identity_h_needs_ocr() {
 /// resulting ciphertext is 100% printable ASCII, so it must be caught by the
 /// substitution-cipher statistics and routed to OCR instead of served silently.
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_mem_shifted_cipher_tounicode_needs_ocr() {
     let buf = std::fs::read("tests/fixtures/shifted_cipher_tounicode.pdf").unwrap();
     let result = extract_pages_markdown_mem(&buf, None).unwrap();
@@ -1389,6 +1401,7 @@ fn test_extract_pages_mem_shifted_cipher_tounicode_needs_ocr() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_regions_mem_multiple_regions_per_page() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let regions = extract_text_in_regions_mem(
@@ -1415,6 +1428,7 @@ fn test_extract_regions_mem_multiple_regions_per_page() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_regions_mem_nonexistent_page() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let regions =
@@ -1427,6 +1441,7 @@ fn test_extract_regions_mem_nonexistent_page() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_regions_mem_empty_region() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let regions = extract_text_in_regions_mem(&buf, &[(0, vec![[0.0, 0.0, 0.0, 0.0]])]).unwrap();
@@ -1444,6 +1459,7 @@ fn test_extract_regions_mem_not_a_pdf() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_regions_mem_rotated_page_not_false_empty() {
     let buf = std::fs::read("tests/fixtures/tnagriculture_06_12.pdf").unwrap();
     let regions =
@@ -1501,6 +1517,7 @@ fn test_collect_text_in_region_uses_rtl_sorting() {
 /// for a page, verify the extracted text has meaningful overlap with the normal
 /// markdown output — catching silent quality regressions.
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_regions_fast_vs_normal_comparison() {
     let fixtures = [
         "tests/fixtures/nexo-price-en.pdf",
@@ -1561,6 +1578,7 @@ fn test_extract_regions_fast_vs_normal_comparison() {
 // =========================================================================
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_in_regions_table_pdf() {
     // tnagriculture has a clear table with district names and spice columns
     let buf = std::fs::read("tests/fixtures/tnagriculture_06_12.pdf").unwrap();
@@ -1586,6 +1604,7 @@ fn test_extract_tables_in_regions_table_pdf() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_in_regions_non_table_region() {
     // Use a small region that likely won't contain enough items for a table
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
@@ -1608,6 +1627,7 @@ fn test_extract_tables_in_regions_non_table_region() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_in_regions_empty_region() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let results = extract_tables_in_regions_mem(&buf, &[(0, vec![[0.0, 0.0, 0.0, 0.0]])]).unwrap();
@@ -1619,6 +1639,7 @@ fn test_extract_tables_in_regions_empty_region() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_in_regions_identity_h_needs_ocr() {
     let buf = std::fs::read("tests/fixtures/shinagawa_identity_h.pdf").unwrap();
     let results =
@@ -1637,6 +1658,7 @@ fn test_extract_tables_in_regions_not_a_pdf() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_in_regions_nonexistent_page() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let results =
@@ -1649,6 +1671,7 @@ fn test_extract_tables_in_regions_nonexistent_page() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_bits_pilani_page4_table_detection() {
     // Page 4 (0-indexed 3) has a table with multi-line wrapped headers and
     // numeric data columns. The heuristic detector previously failed because:
@@ -1673,6 +1696,7 @@ fn test_bits_pilani_page4_table_detection() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_bits_pilani_page8_table_detection() {
     // Page 8 (0-indexed 7) has a numbered-row table that already worked.
     // Verify it still works after changes.
@@ -2084,6 +2108,7 @@ fn test_detect_vector_grid_in_region_filters_to_requested_table() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_with_structure_real_pdf_bits_pilani() {
     use pdf_inspector::{extract_tables_with_structure_mem, TsrTableInput};
     // Hand-crafted TSR fixture targeting page 4 (0-indexed=3) of
@@ -2222,6 +2247,7 @@ fn test_extract_tables_with_structure_dense_overlapping_slanet_boxes() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_with_structure_input_order_preserved() {
     use pdf_inspector::{extract_tables_with_structure_mem, TsrTableInput};
     let buf = std::fs::read("tests/fixtures/bits_pilani_feedback.pdf").unwrap();
@@ -2262,6 +2288,7 @@ fn test_extract_tables_with_structure_input_order_preserved() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_with_structure_out_of_range_page() {
     use pdf_inspector::{extract_tables_with_structure_mem, TsrTableInput};
     let buf = std::fs::read("tests/fixtures/bits_pilani_feedback.pdf").unwrap();
@@ -2296,6 +2323,7 @@ fn test_extract_tables_with_structure_not_a_pdf() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_with_structure_empty_inputs() {
     use pdf_inspector::extract_tables_with_structure_mem;
     let buf = std::fs::read("tests/fixtures/bits_pilani_feedback.pdf").unwrap();
@@ -2304,6 +2332,7 @@ fn test_extract_tables_with_structure_empty_inputs() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_with_structure_cells_real_pdf_bits_pilani() {
     use pdf_inspector::{extract_tables_with_structure_cells_mem, TsrTableInput};
     // Same fixture as test_extract_tables_with_structure_real_pdf_bits_pilani
@@ -2381,6 +2410,7 @@ fn test_extract_tables_with_structure_cells_real_pdf_bits_pilani() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_tables_with_structure_separator_after_thead() {
     use pdf_inspector::{extract_tables_with_structure_mem, TsrTableInput};
     // Re-run the same 2x2 fixture but assert exact markdown output: with
@@ -2625,6 +2655,7 @@ fn test_auto_expands_under_counted_vector_grid_rows() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_auto_keeps_wrapped_header_vector_grid_doc51() {
     use pdf_inspector::{extract_tables_with_structure_auto_mem, TsrTableInput};
 
@@ -2903,6 +2934,7 @@ fn test_auto_isolates_per_input_failures() {
 // =========================================================================
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_basic() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let result = extract_pages_markdown_mem(&buf, Some(&[0, 1])).unwrap();
@@ -2916,6 +2948,7 @@ fn test_extract_pages_markdown_basic() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_page_ordering() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     // Request pages in non-sequential order
@@ -2928,6 +2961,7 @@ fn test_extract_pages_markdown_page_ordering() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_out_of_range() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let result = extract_pages_markdown_mem(&buf, Some(&[9999])).unwrap();
@@ -2940,6 +2974,7 @@ fn test_extract_pages_markdown_out_of_range() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_empty_pages_list() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let result = extract_pages_markdown_mem(&buf, Some(&[])).unwrap();
@@ -2947,6 +2982,7 @@ fn test_extract_pages_markdown_empty_pages_list() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_single_page() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let result = extract_pages_markdown_mem(&buf, Some(&[0])).unwrap();
@@ -2964,6 +3000,7 @@ fn test_extract_pages_markdown_invalid_buffer() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_gid_pages_need_ocr() {
     // shinagawa_identity_h.pdf has GID-encoded fonts
     let buf = std::fs::read("tests/fixtures/shinagawa_identity_h.pdf").unwrap();
@@ -2975,6 +3012,7 @@ fn test_extract_pages_markdown_gid_pages_need_ocr() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_classification_with_tables() {
     // nexo-price-en.pdf is known to have tables
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
@@ -2990,6 +3028,7 @@ fn test_extract_pages_markdown_classification_with_tables() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_simple_pdf_no_complexity() {
     // bare_name_struct.pdf is a simple document with a heading and code block
     let buf = std::fs::read("tests/fixtures/bare_name_struct.pdf").unwrap();
@@ -3001,6 +3040,7 @@ fn test_extract_pages_markdown_simple_pdf_no_complexity() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_classification_matches_process_pdf() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let full = process_pdf_mem(&buf).unwrap();
@@ -3019,6 +3059,7 @@ fn test_extract_pages_markdown_classification_matches_process_pdf() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_consistency_with_process_pdf() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
 
@@ -3056,6 +3097,7 @@ fn test_extract_pages_markdown_consistency_with_process_pdf() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_none_returns_all_pages() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let page_count = process_pdf_mem(&buf).unwrap().page_count;
@@ -3069,6 +3111,7 @@ fn test_extract_pages_markdown_none_returns_all_pages() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_path_api() {
     let path = "tests/fixtures/nexo-price-en.pdf";
     let buf = std::fs::read(path).unwrap();
@@ -3083,6 +3126,7 @@ fn test_extract_pages_markdown_path_api() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn test_extract_pages_markdown_path_none_returns_all_pages() {
     let path = "tests/fixtures/nexo-price-en.pdf";
     let page_count = process_pdf_mem(&std::fs::read(path).unwrap())
@@ -3612,6 +3656,7 @@ fn test_markdown_options_default_has_include_images_false() {
 }
 
 #[test]
+#[cfg(feature = "legacy-pdf-fixtures")]
 fn encrypted_pdf_decrypts_with_correct_password() {
     let path = "tests/fixtures/encrypted-secret123.pdf";
 
