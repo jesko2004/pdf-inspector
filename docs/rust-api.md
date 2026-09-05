@@ -2,8 +2,6 @@
 
 Fast PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Pure Rust, no ML models, no external services; the only PDF dependency is [lopdf](https://crates.io/crates/lopdf). Python, Node.js, and browser WebAssembly bindings are included in this repository.
 
-Created and maintained as the [jesko2004/pdf-inspector](https://github.com/jesko2004/pdf-inspector) project.
-
 ## Features
 
 - **Smart classification** — TextBased / Scanned / ImageBased / Mixed in ~10–50ms, with a confidence score and per-page OCR routing.
@@ -22,7 +20,7 @@ For the latest unreleased changes, use the git dependency instead:
 
 ```toml
 [dependencies]
-pdf-inspector = { package = "jesko-pdf-inspector", git = "https://github.com/jesko2004/pdf-inspector" }
+pdf-inspector = { git = "https://github.com/jesko2004/pdf-inspector" }
 ```
 
 The crate also ships CLI binaries — `pdf2md` (PDF → Markdown, with `--json`, `--pages`, `--select-pages`, and the opt-in token-saving `--compact` profile) and `detect-pdf` (classification, with `--analyze --json`):

@@ -3,8 +3,7 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "jesko-pdf-inspector"
-# Bump this before manually publishing a new PyPI release.
+name = "pdf-inspector"
 version = "0.2.6"
 description = "Fast PDF inspection, classification, and text extraction with smart scanned vs text-based detection"
 readme = "docs/python.md"
@@ -18,8 +17,6 @@ classifiers = [
     "Operating System :: OS Independent",
     "Topic :: Text Processing",
 ]
-maintainers = [{ name = "jesko2004" }]
-
 [project.urls]
 Homepage = "https://github.com/jesko2004/pdf-inspector"
 Repository = "https://github.com/jesko2004/pdf-inspector"

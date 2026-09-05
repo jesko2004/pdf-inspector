@@ -1,11 +1,8 @@
 # pdf-inspector
 
-[![Repository](https://img.shields.io/badge/repository-jesko2004%2Fpdf--inspector-blue)](https://github.com/jesko2004/pdf-inspector)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Fast Rust library for PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Includes bindings for [Python](docs/python.md), [Node.js](napi/README.md), and [browser WebAssembly](wasm/README.md).
-
-Created and maintained as the [jesko2004/pdf-inspector](https://github.com/jesko2004/pdf-inspector) project.
 
 ## Features
 
@@ -100,7 +97,7 @@ Or add it manually:
 
 ```toml
 [dependencies]
-pdf-inspector = { package = "jesko-pdf-inspector", git = "https://github.com/jesko2004/pdf-inspector.git" }
+pdf-inspector = { git = "https://github.com/jesko2004/pdf-inspector.git" }
 ```
 
 ```rust

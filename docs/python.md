@@ -2,8 +2,6 @@
 
 Fast PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Python bindings via [PyO3](https://pyo3.rs) for the [pdf-inspector](https://github.com/jesko2004/pdf-inspector) Rust library.
 
-Created and maintained as the [jesko2004/pdf-inspector](https://github.com/jesko2004/pdf-inspector) project.
-
 ## Features
 
 - **Smart classification** — `text_based` / `scanned` / `image_based` / `mixed` in ~10–50ms, with a confidence score and per-page OCR routing.

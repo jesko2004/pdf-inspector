@@ -1,9 +1,8 @@
 [package]
-name = "jesko-pdf-inspector"
+name = "pdf-inspector"
 version = "0.1.7"
 edition = "2021"
 autobins = false
-authors = ["jesko2004"]
 description = "Fast PDF inspection, classification, and text extraction with smart scanned vs text-based detection"
 license = "MIT"
 repository = "https://github.com/jesko2004/pdf-inspector"

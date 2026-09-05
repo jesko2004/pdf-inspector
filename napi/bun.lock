@@ -3,14 +3,9 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@jesko2004/pdf-inspector",
+      "name": "pdf-inspector-local",
       "devDependencies": {
         "@napi-rs/cli": "^3.4.1",
-      },
-      "optionalDependencies": {
-        "@jesko2004/pdf-inspector-darwin-arm64": "1.11.2",
-        "@jesko2004/pdf-inspector-linux-x64-gnu": "1.11.2",
-        "@jesko2004/pdf-inspector-win32-x64-msvc": "1.11.2",
       },
     },
   },

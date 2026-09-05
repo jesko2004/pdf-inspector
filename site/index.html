@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>pdf-inspector — fast, open-source PDF to Markdown</title>
-<meta name="description" content="jesko2004's Rust PDF parser for structured Markdown extraction through CLI, Python, Node.js, and WebAssembly.">
+<meta name="description" content="A Rust PDF parser for structured Markdown extraction through CLI, Python, Node.js, and WebAssembly.">
 <meta name="theme-color" content="#f9f9f9">
 <meta property="og:title" content="pdf-inspector">
 <meta property="og:description" content="Fast PDF classification and structured Markdown extraction for Node.js, Python, Rust, and the command line.">
@@ -652,11 +652,11 @@
     <div class="hero-main pad">
       <div>
         <div class="hero-labels">
-          <div class="oss-label"><i aria-hidden="true"></i>jesko2004 · MIT</div>
+          <div class="oss-label"><i aria-hidden="true"></i>Open source · MIT</div>
           <div class="rust-label"><i aria-hidden="true">RS</i>Rust core</div>
         </div>
         <h1>PDF structure,<br><em>built for speed.</em></h1>
-        <p class="hero-copy">A Rust-powered, open-source parser by jesko2004 that classifies PDFs and turns native text into clean, position-aware Markdown. Use it from the CLI, Python, Node.js, or browser WebAssembly.</p>
+        <p class="hero-copy">A Rust-powered, open-source parser that classifies PDFs and turns native text into clean, position-aware Markdown. Use it from the CLI, Python, Node.js, or browser WebAssembly.</p>
         <div class="hero-actions">
           <a class="button button-primary" href="https://github.com/jesko2004/pdf-inspector">View on GitHub <span class="arrow" aria-hidden="true">↗</span></a>
           <a class="button" href="#demo">Try it locally <span class="arrow" aria-hidden="true">↓</span></a>
@@ -670,7 +670,7 @@
           <span>Rust CLI · local</span>
         </div>
         <pre><span class="prompt">$</span> cargo install --git https://github.com/jesko2004/pdf-inspector.git
-<span class="term-muted">   built the personal project CLI</span>
+<span class="term-muted">   built the project CLI from source</span>
 
 <span class="prompt">$</span> pdf2md annual-report.pdf
 <span class="term-key"># Annual report 2025</span>
@@ -712,7 +712,7 @@
         <code>cargo install --git https://github.com/jesko2004/pdf-inspector.git</code>
       </a>
     </div>
-    <p class="package-note">Source-build instructions for the personal jesko2004/pdf-inspector repository.</p>
+    <p class="package-note">Source-build instructions for the CLI and language bindings.</p>
   </div>
 
   <section id="demo" class="full-rule">
@@ -804,7 +804,7 @@
           <article class="capability">
             <div class="cap-id"><span>06</span><span>napi/</span></div>
             <h3>Packaged for your stack</h3>
-            <p>Use the personal Node.js, Python, Rust, and WebAssembly interfaces, all backed by the same Rust implementation.</p>
+            <p>Use the Node.js, Python, Rust, and WebAssembly interfaces, all backed by the same Rust implementation.</p>
           </article>
         </div>
       </div>
@@ -874,7 +874,7 @@
         </div>
         <div class="best-fit">
           <strong>Recommended workflow</strong>
-          <p>Keep a small personal corpus covering native text, scanned pages, tables, columns, encrypted documents, and multilingual text. Review output changes before merging each pull request.</p>
+          <p>Keep a small regression corpus covering native text, scanned pages, tables, columns, encrypted documents, and multilingual text. Review output changes before merging each pull request.</p>
         </div>
       </div>
     </div>
@@ -936,7 +936,7 @@ result = pdf_inspector.<span class="fn">process_pdf</span>(<span class="str">"do
 <span class="fn">print</span>(result.pages_needing_ocr)
 
 <span class="cm"># </span><a href="https://github.com/jesko2004/pdf-inspector/blob/main/docs/python.md">Full Python API reference ↗</a></pre></div>
-              <div class="code-panel" id="panel-rust" role="tabpanel"><pre><span class="cm">// package = "jesko-pdf-inspector"; lib = "pdf_inspector"</span>
+              <div class="code-panel" id="panel-rust" role="tabpanel"><pre><span class="cm">// Rust library API</span>
 <span class="kw">use</span> pdf_inspector::process_pdf;
 
 <span class="kw">let</span> result = <span class="fn">process_pdf</span>(<span class="str">"document.pdf"</span>)?;
@@ -957,7 +957,7 @@ result = pdf_inspector.<span class="fn">process_pdf</span>(<span class="str">"do
 
 <footer class="full-rule">
   <div class="shell footer-main pad">
-    <div class="footer-brand"><span>Created and maintained by <a href="https://github.com/jesko2004">jesko2004</a> · MIT licensed</span></div>
+    <div class="footer-brand"><span>pdf-inspector · MIT licensed</span></div>
     <div class="footer-links">
       <a href="https://github.com/jesko2004/pdf-inspector">GitHub</a>
       <a href="https://github.com/jesko2004/pdf-inspector/blob/main/docs/rust-api.md">Rust</a>

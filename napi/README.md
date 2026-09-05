@@ -2,8 +2,6 @@
 
 Fast PDF classification and region-based text extraction for Node.js/Bun. Native Rust performance via [napi-rs](https://napi.rs).
 
-Created and maintained as the [jesko2004/pdf-inspector](https://github.com/jesko2004/pdf-inspector) project.
-
 ## Features
 
 - **Smart classification** — text-based / scanned / image-based / mixed in ~10–50ms, with a confidence score and per-page OCR routing.
@@ -20,9 +18,6 @@ cd pdf-inspector/napi
 npm install
 npm run build
 ```
-
-The personal npm distribution name is `@jesko2004/pdf-inspector`. Until its
-first registry release, use the source build above.
 
 ## API
 
@@ -100,16 +95,6 @@ interface RegionText {
   ocrReason?: string        // "suspected_garbled_text" when known
 }
 ```
-
-## Platforms
-
-Prebuilt binaries ship as platform-specific packages installed automatically via `optionalDependencies`:
-
-| Platform | Architecture | Package |
-|----------|-------------|---------|
-| Linux    | x64 (glibc) | `@jesko2004/pdf-inspector-linux-x64-gnu` |
-| macOS    | ARM64       | `@jesko2004/pdf-inspector-darwin-arm64` |
-| Windows  | x64         | `@jesko2004/pdf-inspector-win32-x64-msvc` |
 
 ## License
 
