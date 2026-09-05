@@ -62,7 +62,7 @@ pub struct PageOcrReasons {
 pub struct PdfClassification {
     pub pdf_type: PdfType,
     pub page_count: u32,
-    /// 0-indexed page numbers that need OCR.
+    /// 1-indexed page numbers that need OCR.
     pub pages_needing_ocr: Vec<u32>,
     pub confidence: f64,
 }
@@ -91,7 +91,7 @@ pub struct TextItem {
     pub link_url: Option<String>,
 }
 
-/// A page's regions for text extraction: (page_index_0based, bboxes).
+/// A page's regions for text extraction. Page numbers are 1-indexed.
 #[napi(object)]
 pub struct PageRegions {
     pub page: u32,
@@ -153,9 +153,7 @@ fn to_napi_result(r: pdf_inspector::PdfProcessResult) -> PdfResult {
     }
 }
 
-fn to_napi_page_ocr_reasons(
-    reasons: Vec<pdf_inspector::PageOcrReasons>,
-) -> Vec<PageOcrReasons> {
+fn to_napi_page_ocr_reasons(reasons: Vec<pdf_inspector::PageOcrReasons>) -> Vec<PageOcrReasons> {
     reasons
         .into_iter()
         .map(|reason| PageOcrReasons {
@@ -234,7 +232,7 @@ pub fn detect_pdf(buffer: Buffer) -> Result<PdfResult> {
 
 /// Lightweight PDF classification — returns type, page count, and OCR pages.
 /// Faster than detectPdf as it skips building the full PdfResult.
-/// Pages in pagesNeedingOcr are 0-indexed.
+/// Pages in pagesNeedingOcr are 1-indexed.
 #[napi]
 pub fn classify_pdf(buffer: Buffer) -> Result<PdfClassification> {
     let bytes: Vec<u8> = buffer.to_vec();
@@ -361,13 +359,13 @@ pub fn extract_tables_in_regions(
 /// Returns TSR-compatible structure tokens plus crop-pixel cell bboxes, or
 /// `null` when the region does not contain a valid vector grid.
 ///
-/// `pageIdx` is 0-indexed. `regionPdfPtBbox` is `[x1,y1,x2,y2]` in PDF
+/// `pageNumber` is 1-indexed. `regionPdfPtBbox` is `[x1,y1,x2,y2]` in PDF
 /// points with top-left origin. `renderDpi` is the DPI of the crop image that
 /// will consume the returned cell bboxes.
 #[napi]
 pub fn detect_vector_grid_in_region(
     buffer: Buffer,
-    page_idx: u32,
+    page_number: u32,
     region_pdf_pt_bbox: Vec<f64>,
     render_dpi: f64,
 ) -> Result<Option<VectorGridDetectionJs>> {
@@ -386,7 +384,7 @@ pub fn detect_vector_grid_in_region(
     catch_panic("detect_vector_grid_in_region", move || {
         let result = pdf_inspector::detect_vector_grid_in_region_mem(
             &bytes,
-            page_idx,
+            page_number,
             region,
             render_dpi as f32,
         )
@@ -412,7 +410,7 @@ pub fn detect_vector_grid_in_region(
 /// the cells and pulls the cell text from the native PDF — no OCR involved.
 #[napi(object)]
 pub struct TsrTableInputJs {
-    /// 0-indexed page number where the crop was taken from.
+    /// 1-indexed page number where the crop was taken from.
     pub page: u32,
     /// Crop bbox on the page, `[x1, y1, x2, y2]` in PDF points with
     /// top-left origin.
@@ -589,7 +587,7 @@ fn parse_tsr_inputs(inputs: &[TsrTableInputJs]) -> Vec<pdf_inspector::TsrTableIn
 /// Per-page markdown extraction result.
 #[napi(object)]
 pub struct PageMarkdownResult {
-    /// 0-indexed page number.
+    /// 1-indexed page number.
     pub page: u32,
     /// Formatted markdown for this page.
     pub markdown: String,
@@ -624,7 +622,7 @@ pub struct PagesExtractionResult {
 /// full document so header detection is consistent across pages.
 ///
 /// Omit `pages` (or pass `undefined`) to return every page in document
-/// order. Pass an array of 0-indexed page numbers to restrict output to
+/// order. Pass an array of 1-indexed page numbers to restrict output to
 /// those pages, in caller-supplied order.
 #[napi]
 pub fn extract_pages_markdown(

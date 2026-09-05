@@ -1,11 +1,6 @@
 name: Publish Python package
 
 on:
-  push:
-    branches: [main]
-    paths: ['pyproject.toml']
-  # Manual fallback: re-publish the current version without a version bump
-  # (e.g. first run after PyPI trusted publishing is configured).
   workflow_dispatch:
 
 permissions:

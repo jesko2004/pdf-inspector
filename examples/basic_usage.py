@@ -79,7 +79,7 @@ def main():
     print(f"Type:       {cls.pdf_type}")
     print(f"Pages:      {cls.page_count}")
     print(f"Confidence: {cls.confidence:.0%}")
-    print(f"OCR pages:  {cls.pages_needing_ocr or 'none'} (0-indexed)")
+    print(f"OCR pages:  {cls.pages_needing_ocr or 'none'} (1-indexed)")
 
     # 7. Region-based text extraction
     print("\n" + "=" * 60)

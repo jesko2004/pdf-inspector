@@ -1,8 +1,8 @@
 # pdf-inspector
 
-Fast PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Python bindings via [PyO3](https://pyo3.rs) for the [pdf-inspector](https://github.com/firecrawl/pdf-inspector) Rust library.
+Fast PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Python bindings via [PyO3](https://pyo3.rs) for the [pdf-inspector](https://github.com/jesko2004/pdf-inspector) Rust library.
 
-Built by [Firecrawl](https://firecrawl.dev) to handle text-based PDFs locally in under 200ms, skipping expensive OCR services for the ~54% of PDFs that don't need them.
+Maintained by [jesko2004](https://github.com/jesko2004). Originally built by [Firecrawl](https://firecrawl.dev) and retained under the MIT license.
 
 ## Features
 
@@ -24,7 +24,7 @@ Built by [Firecrawl](https://firecrawl.dev) to handle text-based PDFs locally in
 | pymupdf4llm | 0.735 | 0.886 | 0.401 | 0.424 | 17.117s |
 | markitdown | 0.589 | 0.844 | 0.273 | 0.000 | 16.165s |
 
-Refreshed July 31, 2026, on Apple M4 Pro; speed is the median of five complete corpus runs after an excluded warm-up. Full methodology and versions are in the [repo README](https://github.com/firecrawl/pdf-inspector#benchmark), with raw timings and artifacts in the [results branch](https://github.com/firecrawl/opendataloader-bench/tree/abi/pdf-parser-benchmark-results).
+Refreshed July 31, 2026, on Apple M4 Pro; speed is the median of five complete corpus runs after an excluded warm-up. Full methodology and versions are in the [repo README](https://github.com/jesko2004/pdf-inspector#benchmark), with raw timings and artifacts in the [results branch](https://github.com/firecrawl/opendataloader-bench/tree/abi/pdf-parser-benchmark-results).
 
 ## Install
 
@@ -78,9 +78,12 @@ result = pdf_inspector.extract_pages_markdown("document.pdf")
 for page in result.pages:
     print(f"Page {page.page}: {len(page.markdown)} chars, needs_ocr={page.needs_ocr}")
 
-# Restrict to specific 0-indexed pages (preserves caller order)
-result = pdf_inspector.extract_pages_markdown("document.pdf", pages=[0, 2])
+# Restrict to specific 1-indexed pages (preserves caller order)
+result = pdf_inspector.extract_pages_markdown("document.pdf", pages=[1, 3])
 ```
+
+All public page inputs and result fields are 1-indexed. Passing page `0`
+raises `ValueError`.
 
 ## API reference
 
@@ -122,7 +125,7 @@ class PdfResult:                     # process_pdf / detect_pdf
 class PdfClassification:             # classify_pdf
     pdf_type: str
     page_count: int
-    pages_needing_ocr: list[int]     # 0-indexed
+    pages_needing_ocr: list[int]     # 1-indexed
     confidence: float
 
 class TextItem:                      # extract_text_with_positions
@@ -141,11 +144,11 @@ class TextItem:                      # extract_text_with_positions
     item_type: str
 
 class PageRegionTexts:               # extract_text_in_regions
-    page: int                        # 0-indexed
+    page: int                        # 1-indexed
     regions: list[RegionText]        # RegionText: text: str, needs_ocr: bool
 
 class PagesExtractionResult:         # extract_pages_markdown
-    pages: list[PageMarkdown]        # PageMarkdown: page (0-indexed), markdown, needs_ocr
+    pages: list[PageMarkdown]        # PageMarkdown: page (1-indexed), markdown, needs_ocr
     pages_with_tables: list[int]     # 1-indexed
     pages_with_columns: list[int]    # 1-indexed
     pages_needing_ocr: list[int]     # 1-indexed

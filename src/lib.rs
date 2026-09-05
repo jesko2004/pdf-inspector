@@ -380,7 +380,7 @@ pub struct PdfClassification {
     pub pdf_type: PdfType,
     /// Total page count.
     pub page_count: u32,
-    /// 0-indexed page numbers that need OCR (scanned/image pages).
+    /// 1-indexed page numbers that need OCR (scanned/image pages).
     pub pages_needing_ocr: Vec<u32>,
     /// Detection confidence score (0.0–1.0).
     pub confidence: f32,
@@ -395,8 +395,7 @@ pub fn classify_pdf_mem(buffer: &[u8]) -> Result<PdfClassification, PdfError> {
     Ok(PdfClassification {
         pdf_type: detection.pdf_type,
         page_count,
-        // Convert from 1-indexed to 0-indexed for caller convenience
-        pages_needing_ocr: detection.pages_needing_ocr.iter().map(|&p| p - 1).collect(),
+        pages_needing_ocr: detection.pages_needing_ocr,
         confidence: detection.confidence,
     })
 }
@@ -408,7 +407,7 @@ pub fn classify_pdf_mem(buffer: &[u8]) -> Result<PdfClassification, PdfError> {
 /// Per-page markdown extraction result.
 #[derive(Debug)]
 pub struct PageMarkdown {
-    /// 0-indexed page number.
+    /// 1-indexed page number.
     pub page: u32,
     /// Formatted markdown for this page.
     pub markdown: String,
@@ -443,8 +442,8 @@ pub struct PagesExtractionResult {
 /// this returns per-page markdown so callers can mix direct extraction
 /// (for simple text pages) with GPU OCR (for complex/scanned pages).
 ///
-/// When `pages` is `None`, every page (0-indexed, in document order) is
-/// returned. When `Some(&[...])`, only the listed 0-indexed pages are
+/// When `pages` is `None`, every page (1-indexed, in document order) is
+/// returned. When `Some(&[...])`, only the listed 1-indexed pages are
 /// returned, in the caller's order.
 ///
 /// Font statistics are computed from the full document so header
@@ -460,6 +459,7 @@ pub fn extract_pages_markdown_mem(
 ) -> Result<PagesExtractionResult, PdfError> {
     validate_pdf_bytes(buffer)?;
     let (doc, page_count) = load_document_from_mem(buffer)?;
+    validate_page_numbers(pages.into_iter().flatten().copied())?;
     let font_cmaps = FontCMaps::from_doc(&doc);
 
     // Extract ALL pages to get accurate, document-wide font stats.
@@ -478,7 +478,7 @@ pub fn extract_pages_markdown_mem(
     let pages_slice: &[u32] = match pages {
         Some(p) => p,
         None => {
-            all_pages = (0..page_count).collect();
+            all_pages = (1..=page_count).collect();
             &all_pages
         }
     };
@@ -487,12 +487,12 @@ pub fn extract_pages_markdown_mem(
     let mut pages_needing_ocr = Vec::new();
     let mut ocr_reasons_by_page = BTreeMap::new();
 
-    for &page_0idx in pages_slice {
+    for &page_number in pages_slice {
         // Out-of-range pages → empty + needs_ocr
-        if page_0idx >= page_count {
-            pages_needing_ocr.push(page_0idx + 1);
+        if page_number > page_count {
+            pages_needing_ocr.push(page_number);
             results.push(PageMarkdown {
-                page: page_0idx,
+                page: page_number,
                 markdown: String::new(),
                 needs_ocr: true,
                 ocr_reason: None,
@@ -500,23 +500,21 @@ pub fn extract_pages_markdown_mem(
             continue;
         }
 
-        let page_1idx = page_0idx + 1;
-
         // Filter items/rects for this page only
         let page_items: Vec<TextItem> = all_items
             .iter()
-            .filter(|i| i.page == page_1idx)
+            .filter(|i| i.page == page_number)
             .cloned()
             .collect();
 
         let page_rects: Vec<PdfRect> = all_rects
             .iter()
-            .filter(|r| r.page == page_1idx)
+            .filter(|r| r.page == page_number)
             .cloned()
             .collect();
 
-        let has_gid = gid_pages.contains(&page_1idx);
-        let has_text_quality_issue = text_quality.pages_needing_ocr.contains(&page_1idx);
+        let has_gid = gid_pages.contains(&page_number);
+        let has_text_quality_issue = text_quality.pages_needing_ocr.contains(&page_number);
 
         // Build markdown with document-wide font stats
         let options = MarkdownOptions {
@@ -545,21 +543,21 @@ pub fn extract_pages_markdown_mem(
         if has_decoding_issue {
             add_ocr_reason(
                 &mut ocr_reasons_by_page,
-                page_1idx,
+                page_number,
                 OCR_REASON_SUSPECTED_GARBLED_TEXT,
             );
         }
-        let ocr_reason = page_ocr_reason(&ocr_reasons_by_page, page_1idx);
+        let ocr_reason = page_ocr_reason(&ocr_reasons_by_page, page_number);
 
         let needs_ocr =
             ocr_reason.is_some() || md.trim().is_empty() || has_gid || is_garbage_text(&md);
 
         if needs_ocr {
-            pages_needing_ocr.push(page_1idx);
+            pages_needing_ocr.push(page_number);
         }
 
         results.push(PageMarkdown {
-            page: page_0idx,
+            page: page_number,
             markdown: if needs_ocr { String::new() } else { md },
             needs_ocr,
             ocr_reason,
@@ -580,7 +578,7 @@ pub fn extract_pages_markdown_mem(
 ///
 /// Reads the PDF from disk and extracts per-page markdown. Pass `None` for
 /// `pages` to return every page in document order, or `Some(&[...])` to
-/// restrict to specific 0-indexed pages (in caller-supplied order).
+/// restrict to specific 1-indexed pages (in caller-supplied order).
 pub fn extract_pages_markdown<P: AsRef<Path>>(
     path: P,
     pages: Option<&[u32]>,
@@ -610,7 +608,7 @@ pub struct RegionText {
 /// Result for a page's region extractions.
 #[derive(Debug)]
 pub struct PageRegionResult {
-    /// 0-indexed page number.
+    /// 1-indexed page number.
     pub page: u32,
     /// Per-region results, parallel to the input regions.
     pub regions: Vec<RegionText>,
@@ -628,7 +626,7 @@ pub struct PageRegionResult {
 /// # Arguments
 ///
 /// * `buffer` — PDF file bytes
-/// * `page_regions` — list of `(page_number_0indexed, Vec<[x1, y1, x2, y2]>)`.
+/// * `page_regions` — list of `(page_number_1indexed, Vec<[x1, y1, x2, y2]>)`.
 ///   Coordinates are in **PDF points** with **top-left origin** (matching typical
 ///   layout model output after coordinate conversion).
 ///
@@ -641,10 +639,10 @@ pub fn extract_text_in_regions_mem(
 ) -> Result<Vec<PageRegionResult>, PdfError> {
     validate_pdf_bytes(buffer)?;
     let (doc, _page_count) = load_document_from_mem(buffer)?;
+    validate_page_numbers(page_regions.iter().map(|(page, _)| *page))?;
     let pages = doc.get_pages();
 
-    // Build a set of pages we need to extract (1-indexed for lopdf)
-    let needed_pages: HashSet<u32> = page_regions.iter().map(|(p, _)| p + 1).collect();
+    let needed_pages: HashSet<u32> = page_regions.iter().map(|(page, _)| *page).collect();
 
     // Fast mode: skip expensive TrueType font fallback parsing.
     // Fonts that can't be decoded from ToUnicode alone will produce empty/garbage
@@ -694,13 +692,12 @@ pub fn extract_text_in_regions_mem(
     // For each page's regions, filter and assemble text
     let mut results = Vec::with_capacity(page_regions.len());
 
-    for (page_0idx, regions) in page_regions {
-        let page_1idx = page_0idx + 1;
-        let items = items_by_page.get(&page_1idx);
-        let page_h = page_heights.get(&page_1idx).copied().unwrap_or(792.0);
-        let _page_has_gid = gid_pages.contains(&page_1idx);
-        let adaptive_threshold = page_thresholds.get(&page_1idx).copied().unwrap_or(0.10);
-        let coords = if rotated_pages.contains(&page_1idx) {
+    for (page_number, regions) in page_regions {
+        let items = items_by_page.get(page_number);
+        let page_h = page_heights.get(page_number).copied().unwrap_or(792.0);
+        let _page_has_gid = gid_pages.contains(page_number);
+        let adaptive_threshold = page_thresholds.get(page_number).copied().unwrap_or(0.10);
+        let coords = if rotated_pages.contains(page_number) {
             RegionCoordSpace::Rotated90Ccw
         } else {
             RegionCoordSpace::Standard
@@ -790,7 +787,7 @@ pub fn extract_text_in_regions_mem(
         }
 
         results.push(PageRegionResult {
-            page: *page_0idx,
+            page: *page_number,
             regions: page_results,
         });
     }
@@ -813,9 +810,10 @@ pub fn extract_tables_in_regions_mem(
 ) -> Result<Vec<PageRegionResult>, PdfError> {
     validate_pdf_bytes(buffer)?;
     let (doc, _page_count) = load_document_from_mem(buffer)?;
+    validate_page_numbers(page_regions.iter().map(|(page, _)| *page))?;
     let pages = doc.get_pages();
 
-    let needed_pages: HashSet<u32> = page_regions.iter().map(|(p, _)| p + 1).collect();
+    let needed_pages: HashSet<u32> = page_regions.iter().map(|(page, _)| *page).collect();
     let font_cmaps = FontCMaps::from_doc_pages_fast(&doc, Some(&needed_pages));
 
     let mut items_by_page: HashMap<u32, Vec<TextItem>> = HashMap::new();
@@ -860,12 +858,11 @@ pub fn extract_tables_in_regions_mem(
 
     let mut results = Vec::with_capacity(page_regions.len());
 
-    for (page_0idx, regions) in page_regions {
-        let page_1idx = page_0idx + 1;
-        let items = items_by_page.get(&page_1idx);
-        let page_h = page_heights.get(&page_1idx).copied().unwrap_or(792.0);
-        let _page_has_gid = gid_pages.contains(&page_1idx);
-        let coords = if rotated_pages.contains(&page_1idx) {
+    for (page_number, regions) in page_regions {
+        let items = items_by_page.get(page_number);
+        let page_h = page_heights.get(page_number).copied().unwrap_or(792.0);
+        let _page_has_gid = gid_pages.contains(page_number);
+        let coords = if rotated_pages.contains(page_number) {
             RegionCoordSpace::Rotated90Ccw
         } else {
             RegionCoordSpace::Standard
@@ -941,7 +938,7 @@ pub fn extract_tables_in_regions_mem(
             // skip_body_font = false / layout_assisted = true because the
             // layout model already identified this region as a table.
             let region_rects: Vec<PdfRect> = rects_by_page
-                .get(&page_1idx)
+                .get(page_number)
                 .map(|rs| {
                     rs.iter()
                         .filter(|r| region_overlaps_rect(r, bounds))
@@ -950,7 +947,7 @@ pub fn extract_tables_in_regions_mem(
                 })
                 .unwrap_or_default();
             let region_lines: Vec<PdfLine> = lines_by_page
-                .get(&page_1idx)
+                .get(page_number)
                 .map(|ls| {
                     ls.iter()
                         .filter(|l| region_overlaps_line(l, bounds))
@@ -1043,7 +1040,7 @@ pub fn extract_tables_in_regions_mem(
             let mut candidates: Vec<TableCandidate> = Vec::new();
             if !region_rects.is_empty() {
                 let (rect_tables, _) =
-                    tables::detect_tables_from_rects(&matched, &region_rects, page_1idx);
+                    tables::detect_tables_from_rects(&matched, &region_rects, *page_number);
                 if let Some(candidate) = rect_tables
                     .iter()
                     .find_map(|t| evaluate(TableCandidateSource::Rect, t))
@@ -1053,7 +1050,7 @@ pub fn extract_tables_in_regions_mem(
             }
             if !region_lines.is_empty() {
                 let line_tables =
-                    tables::detect_tables_from_lines(&matched, &region_lines, page_1idx);
+                    tables::detect_tables_from_lines(&matched, &region_lines, *page_number);
                 if let Some(candidate) = line_tables
                     .iter()
                     .find_map(|t| evaluate(TableCandidateSource::Line, t))
@@ -1068,12 +1065,13 @@ pub fn extract_tables_in_regions_mem(
             {
                 candidates.push(candidate);
             }
-            if let Some(table) = tables::try_build_table_from_columns(&matched, page_1idx) {
+            if let Some(table) = tables::try_build_table_from_columns(&matched, *page_number) {
                 if let Some(candidate) = evaluate(TableCandidateSource::Column, &table) {
                     candidates.push(candidate);
                 }
             }
-            if let Some(table) = tables::try_build_key_value_table_from_rows(&matched, page_1idx) {
+            if let Some(table) = tables::try_build_key_value_table_from_rows(&matched, *page_number)
+            {
                 if let Some(candidate) = evaluate(TableCandidateSource::KeyValue, &table) {
                     candidates.push(candidate);
                 }
@@ -1094,7 +1092,7 @@ pub fn extract_tables_in_regions_mem(
         }
 
         results.push(PageRegionResult {
-            page: *page_0idx,
+            page: *page_number,
             regions: page_results,
         });
     }
@@ -1124,27 +1122,27 @@ enum VectorGridSource {
 /// the existing PDF-text cell fill path populate contents.
 pub fn detect_vector_grid_in_region_mem(
     buffer: &[u8],
-    page_idx: u32,
+    page_number: u32,
     region_pdf_pt_bbox: [f32; 4],
     render_dpi: f32,
 ) -> Result<Option<VectorGridDetection>, PdfError> {
     validate_pdf_bytes(buffer)?;
     let (doc, _page_count) = load_document_from_mem(buffer)?;
+    validate_page_numbers([page_number])?;
     let pages = doc.get_pages();
 
-    let page_1idx = page_idx + 1;
-    let Some(&page_id) = pages.get(&page_1idx) else {
+    let Some(&page_id) = pages.get(&page_number) else {
         return Ok(None);
     };
 
-    let needed_pages = HashSet::from([page_1idx]);
+    let needed_pages = HashSet::from([page_number]);
     let font_cmaps = FontCMaps::from_doc_pages_fast(&doc, Some(&needed_pages));
     let page_h = get_page_height(&doc, page_id).unwrap_or(792.0);
     let ((mut items, rects, lines), _has_gid, coords_rotated) =
         extractor::content_stream::extract_page_text_items(
             &doc,
             page_id,
-            page_1idx,
+            page_number,
             &font_cmaps,
             false,
             &mut extractor::FontStyleCache::new(),
@@ -1191,7 +1189,7 @@ pub fn detect_vector_grid_in_region_mem(
     // bboxes below are rebuilt from the filtered vector geometry because Table
     // stores centers for some rect paths and row starts for line paths.
     let (rect_tables, _) =
-        tables::detect_tables_from_rects(&items_in_region, &rects_in_region, page_1idx);
+        tables::detect_tables_from_rects(&items_in_region, &rects_in_region, page_number);
     for table in rect_tables {
         if let Some(result) = vector_grid_result_from_table(
             &table,
@@ -1207,8 +1205,11 @@ pub fn detect_vector_grid_in_region_mem(
         }
     }
 
-    let line_tables =
-        tables::detect_vector_grid_tables_from_lines(&items_in_region, &lines_in_region, page_1idx);
+    let line_tables = tables::detect_vector_grid_tables_from_lines(
+        &items_in_region,
+        &lines_in_region,
+        page_number,
+    );
     for table in line_tables {
         if let Some(result) = vector_grid_result_from_table(
             &table,
@@ -1469,7 +1470,7 @@ mod vector_grid_tests {
             [51.48_f32, 478.44, 558.36, 567.36],
         ];
         for crop in crops {
-            let detected = crate::detect_vector_grid_in_region_mem(&buf, 0, crop, 200.0).unwrap();
+            let detected = crate::detect_vector_grid_in_region_mem(&buf, 1, crop, 200.0).unwrap();
             assert!(
                 detected.is_none(),
                 "expected no vector grid for wireless crop {crop:?}; got {} cells",
@@ -1501,7 +1502,7 @@ mod vector_grid_tests {
             [72.0_f32, 390.24, 286.92, 417.6],
         ];
         for crop in crops {
-            let detected = crate::detect_vector_grid_in_region_mem(&buf, 0, crop, 200.0).unwrap();
+            let detected = crate::detect_vector_grid_in_region_mem(&buf, 1, crop, 200.0).unwrap();
             assert!(
                 detected.is_none(),
                 "expected no vector grid for wireless crop {crop:?}; got {} cells",
@@ -1540,7 +1541,7 @@ mod vector_grid_tests {
     fn multiline_indent_cell_rect_grid_region_detects_vector_grid() {
         let buf = std::fs::read("tests/fixtures/multiline_indent_cell_rect_grid.pdf").unwrap();
         let detected =
-            crate::detect_vector_grid_in_region_mem(&buf, 29, [0.0, 0.0, 612.0, 792.0], 200.0)
+            crate::detect_vector_grid_in_region_mem(&buf, 30, [0.0, 0.0, 612.0, 792.0], 200.0)
                 .unwrap()
                 .expect("expected vector grid for multiline indented description table");
         let rows = detected
@@ -2047,7 +2048,7 @@ fn extracted_bbox_to_page_top_left(
 /// the cells and pulls the cell text from the native PDF — no OCR involved.
 #[derive(Debug, Clone)]
 pub struct TsrTableInput {
-    /// 0-indexed page number where the crop was taken from.
+    /// 1-indexed page number where the crop was taken from.
     pub page: u32,
     /// Crop bbox on the page, `[x1, y1, x2, y2]` in PDF points with
     /// **top-left origin** (matches the layout model's coordinate space).
@@ -2094,9 +2095,10 @@ pub fn extract_tables_with_structure_cells_mem(
 
     validate_pdf_bytes(buffer)?;
     let (doc, _page_count) = load_document_from_mem(buffer)?;
+    validate_page_numbers(inputs.iter().map(|input| input.page))?;
     let pages = doc.get_pages();
 
-    let needed_pages: HashSet<u32> = inputs.iter().map(|t| t.page + 1).collect();
+    let needed_pages: HashSet<u32> = inputs.iter().map(|input| input.page).collect();
     let font_cmaps = FontCMaps::from_doc_pages_fast(&doc, Some(&needed_pages));
 
     let mut items_by_page: HashMap<u32, Vec<TextItem>> = HashMap::new();
@@ -2134,15 +2136,15 @@ pub fn extract_tables_with_structure_cells_mem(
     let mut results: Vec<Vec<StructuredCell>> = Vec::with_capacity(inputs.len());
 
     for input in inputs {
-        let page_1idx = input.page + 1;
-        let Some(items) = items_by_page.get(&page_1idx) else {
+        let page_number = input.page;
+        let Some(items) = items_by_page.get(&page_number) else {
             // Out-of-range page or page with no extractable text — emit empty.
             results.push(Vec::new());
             continue;
         };
-        let page_h = page_heights.get(&page_1idx).copied().unwrap_or(792.0);
-        let adaptive_threshold = page_thresholds.get(&page_1idx).copied().unwrap_or(0.10);
-        let coords = if rotated_pages.contains(&page_1idx) {
+        let page_h = page_heights.get(&page_number).copied().unwrap_or(792.0);
+        let adaptive_threshold = page_thresholds.get(&page_number).copied().unwrap_or(0.10);
+        let coords = if rotated_pages.contains(&page_number) {
             RegionCoordSpace::Rotated90Ccw
         } else {
             RegionCoordSpace::Standard
@@ -2906,19 +2908,20 @@ fn detect_tsr_quality_issue(
     // expected to be multi-line and are excluded.
     let (doc, _page_count) = load_document_from_mem(buffer)?;
     let pages = doc.get_pages();
-    let page_1idx = input.page + 1;
-    let Some(&page_id) = pages.get(&page_1idx) else {
+    validate_page_numbers([input.page])?;
+    let page_number = input.page;
+    let Some(&page_id) = pages.get(&page_number) else {
         return Ok(None);
     };
     let page_h = get_page_height(&doc, page_id).unwrap_or(792.0);
     let mut needed: HashSet<u32> = HashSet::new();
-    needed.insert(page_1idx);
+    needed.insert(page_number);
     let font_cmaps = FontCMaps::from_doc_pages_fast(&doc, Some(&needed));
     let ((mut items, _rects, _lines), _has_gid, coords_rotated) =
         extractor::content_stream::extract_page_text_items(
             &doc,
             page_id,
-            page_1idx,
+            page_number,
             &font_cmaps,
             false,
             &mut extractor::FontStyleCache::new(),
@@ -3562,6 +3565,7 @@ fn process_document(
     options: PdfOptions,
     start: ProcessingTimer,
 ) -> Result<PdfProcessResult, PdfError> {
+    validate_page_numbers(options.page_filter.iter().flatten().copied())?;
     // Step 1 — Detection (cheap: scans content streams for text operators)
     let detection = detector::detect_from_document(&doc, page_count, &options.detection)?;
     let pdf_type = detection.pdf_type;
@@ -5618,6 +5622,8 @@ pub enum PdfError {
     InvalidStructure,
     #[error("Not a PDF: {0}")]
     NotAPdf(String),
+    #[error("Invalid page number {0}: PDF pages are numbered from 1")]
+    InvalidPageNumber(u32),
 }
 
 impl From<lopdf::Error> for PdfError {
@@ -5759,6 +5765,15 @@ pub(crate) fn validate_pdf_bytes(buffer: &[u8]) -> Result<(), PdfError> {
     } else {
         Err(PdfError::NotAPdf(detect_file_type_hint(buffer)))
     }
+}
+
+pub(crate) fn validate_page_numbers(
+    page_numbers: impl IntoIterator<Item = u32>,
+) -> Result<(), PdfError> {
+    if let Some(page) = page_numbers.into_iter().find(|page| *page == 0) {
+        return Err(PdfError::InvalidPageNumber(page));
+    }
+    Ok(())
 }
 
 /// Validate that a file on disk looks like a PDF.

@@ -1,38 +1,24 @@
 # Publishing
 
-The Rust crate is published to [crates.io](https://crates.io/crates/pdf-inspector) with trusted publishing from GitHub Actions. The first release was published manually; future releases publish from `.github/workflows/publish-crate.yml` when a `Cargo.toml` version change lands on `main`.
+This repository is maintained at `jesko2004/pdf-inspector`. The package names
+on crates.io, PyPI, and the `@firecrawl` npm scope belong to the upstream
+project and are kept in installation examples only as compatible upstream
+releases.
 
-## crates.io Trusted Publisher
+The inherited publishing workflows are manual-only. Do not run them until
+independent package names have been selected and registry trusted publishing
+has been configured for `jesko2004/pdf-inspector`.
 
-Configure the trusted publisher for the `pdf-inspector` crate with:
+Before enabling automated releases:
 
-- Repository: `firecrawl/pdf-inspector`
-- Workflow: `publish-crate.yml`
-- Environment: `crates-io`
+1. Select available package names for crates.io, PyPI, npm, and WebAssembly.
+2. Update the package manifests, generated package names, optional native
+   dependencies, and installation documentation together.
+3. Configure each registry's trusted publisher for this repository and its
+   corresponding workflow.
+4. Verify package contents with the workflow's dry-run step.
+5. Restore the version-change `push` trigger only after the first independent
+   release succeeds.
 
-The workflow uses `rust-lang/crates-io-auth-action@v1` to exchange GitHub's OIDC token for a short-lived crates.io token, then passes it to `cargo publish`.
-
-## Release Steps
-
-1. Update `version` in `Cargo.toml`.
-2. Merge the version bump to `main`.
-3. The publish workflow compares the new `Cargo.toml` version with `HEAD~1`, runs `cargo publish --dry-run`, then publishes if that version is not already on crates.io.
-
-If `Cargo.toml` changes without a package version bump, the workflow exits without publishing.
-
-## Browser WebAssembly package
-
-The browser package is published as `@firecrawl/pdf-inspector-wasm`. Its version lives in `wasm/Cargo.toml`, and `.github/workflows/publish-wasm.yml` builds the `web` target with `wasm-pack` before publishing the generated package.
-
-The npm package must exist before a trusted publisher can be configured. For the first release only:
-
-1. Build with `wasm-pack build wasm --target web --scope firecrawl --out-dir pkg --release`.
-2. Inspect with `npm pack --dry-run ./wasm/pkg`.
-3. Publish with `npm publish ./wasm/pkg --access public` from an authorized maintainer session.
-4. In the package settings on npm, configure the GitHub Actions trusted publisher:
-   - Organization: `firecrawl`
-   - Repository: `pdf-inspector`
-   - Workflow: `publish-wasm.yml`
-   - Allowed action: `npm publish`
-
-After that one-time bootstrap, bumping the version in `wasm/Cargo.toml` and merging it to `main` publishes through OIDC. Until the package exists, the workflow exits cleanly without attempting an unauthenticated first publish. See npm's [trusted publishing documentation](https://docs.npmjs.com/trusted-publishers/) for the registry-side setup.
+The original Firecrawl copyright notices remain in `LICENSE` and
+`wasm/LICENSE` as required by the MIT license.

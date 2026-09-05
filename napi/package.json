@@ -8,6 +8,8 @@
     "pdf-inspector": "bin/pdf-inspector.mjs"
   },
   "license": "MIT",
+  "author": "jesko2004",
+  "contributors": ["Firecrawl Team"],
   "keywords": [
     "pdf",
     "pdf-extraction",
@@ -27,9 +29,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/firecrawl/pdf-inspector"
+    "url": "https://github.com/jesko2004/pdf-inspector"
   },
-  "homepage": "https://github.com/firecrawl/pdf-inspector",
+  "homepage": "https://github.com/jesko2004/pdf-inspector",
   "publishConfig": {
     "access": "public"
   },

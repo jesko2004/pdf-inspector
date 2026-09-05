@@ -2,7 +2,7 @@
 
 Fast PDF classification and region-based text extraction for Node.js/Bun. Native Rust performance via [napi-rs](https://napi.rs).
 
-Built by [Firecrawl](https://firecrawl.dev) for hybrid OCR pipelines — extract text from PDF structure where possible, fall back to OCR only when needed.
+Maintained by [jesko2004](https://github.com/jesko2004). Originally built by [Firecrawl](https://firecrawl.dev) and retained under the MIT license.
 
 ## Features
 
@@ -24,9 +24,12 @@ Built by [Firecrawl](https://firecrawl.dev) for hybrid OCR pipelines — extract
 | pymupdf4llm | 0.735 | 0.886 | 0.401 | 0.424 | 17.117s |
 | markitdown | 0.589 | 0.844 | 0.273 | 0.000 | 16.165s |
 
-Refreshed July 31, 2026, on Apple M4 Pro; speed is the median of five complete corpus runs after an excluded warm-up. Full methodology and versions are in the [repo README](https://github.com/firecrawl/pdf-inspector#benchmark), with raw timings and artifacts in the [results branch](https://github.com/firecrawl/opendataloader-bench/tree/abi/pdf-parser-benchmark-results).
+Refreshed July 31, 2026, on Apple M4 Pro; speed is the median of five complete corpus runs after an excluded warm-up. Full methodology and versions are in the [repo README](https://github.com/jesko2004/pdf-inspector#benchmark), with raw timings and artifacts in the [results branch](https://github.com/firecrawl/opendataloader-bench/tree/abi/pdf-parser-benchmark-results).
 
 ## Install
+
+The npm package below is the compatible upstream release. Builds from this
+repository identify their source as `jesko2004/pdf-inspector`.
 
 ```bash
 npm install @firecrawl/pdf-inspector
@@ -37,6 +40,9 @@ bun add @firecrawl/pdf-inspector
 Prebuilt binaries for **Linux x64**, **macOS ARM64**, and **Windows x64** — npm installs only the one matching your platform. No Rust toolchain needed.
 
 ## API
+
+All public page inputs and result fields are 1-indexed. The first page is `1`,
+and passing `0` throws an error.
 
 ### `classifyPdf(buffer: Buffer): PdfClassification`
 
@@ -51,7 +57,7 @@ const result = classifyPdf(pdf)
 
 console.log(result.pdfType)        // "TextBased" | "Scanned" | "Mixed" | "ImageBased"
 console.log(result.pageCount)      // 42
-console.log(result.pagesNeedingOcr) // [5, 12, 15] (0-indexed)
+console.log(result.pagesNeedingOcr) // [5, 12, 15] (1-indexed)
 console.log(result.confidence)     // 0.875
 ```
 
@@ -66,7 +72,7 @@ import { extractTextInRegions } from '@firecrawl/pdf-inspector'
 
 const result = extractTextInRegions(pdf, [
   {
-    page: 0, // 0-indexed
+    page: 1, // 1-indexed
     regions: [
       [0, 0, 300, 400],    // [x1, y1, x2, y2] in PDF points, top-left origin
       [300, 0, 612, 400],
@@ -89,12 +95,12 @@ for (const region of result[0].regions) {
 interface PdfClassification {
   pdfType: string          // "TextBased" | "Scanned" | "Mixed" | "ImageBased"
   pageCount: number
-  pagesNeedingOcr: number[] // 0-indexed page numbers
+  pagesNeedingOcr: number[] // 1-indexed page numbers
   confidence: number        // 0.0 - 1.0
 }
 
 interface PageRegions {
-  page: number              // 0-indexed
+  page: number              // 1-indexed
   regions: number[][]       // [[x1, y1, x2, y2], ...] in PDF points, top-left origin
 }
 

@@ -1,8 +1,10 @@
-# @firecrawl/pdf-inspector-wasm
+# pdf-inspector WebAssembly
 
-Browser WebAssembly bindings for [pdf-inspector](https://github.com/firecrawl/pdf-inspector). Classify PDFs and extract structured Markdown locally from a `Uint8Array`, using the same Rust core as the native Node.js, Python, and Rust packages.
+Browser WebAssembly bindings for [pdf-inspector](https://github.com/jesko2004/pdf-inspector). Classify PDFs and extract structured Markdown locally from a `Uint8Array`, using the same Rust core as the native Node.js, Python, and Rust packages.
 
 ## Install
+
+The npm package below is the compatible upstream release.
 
 ```bash
 npm install @firecrawl/pdf-inspector-wasm
@@ -52,7 +54,7 @@ The package also exports:
 
 ```bash
 cargo install wasm-pack --version 0.15.0 --locked
-wasm-pack build wasm --target web --scope firecrawl --release
+wasm-pack build wasm --target web --out-dir pkg --release
 ```
 
 ## License

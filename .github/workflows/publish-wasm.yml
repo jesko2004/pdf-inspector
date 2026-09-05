@@ -1,9 +1,6 @@
 name: Publish WebAssembly package
 
 on:
-  push:
-    branches: [main]
-    paths: ['wasm/Cargo.toml']
   workflow_dispatch:
 
 permissions:
@@ -98,8 +95,8 @@ jobs:
             pkg.name = "@firecrawl/pdf-inspector-wasm"
             pkg.description = "Browser WebAssembly bindings for the pdf-inspector Rust PDF parser"
             pkg.keywords = ["pdf", "pdf-parser", "webassembly", "wasm", "markdown", "rust", "firecrawl"]
-            pkg.repository = { type: "git", url: "https://github.com/firecrawl/pdf-inspector" }
-            pkg.homepage = "https://github.com/firecrawl/pdf-inspector/tree/main/wasm"
+            pkg.repository = { type: "git", url: "https://github.com/jesko2004/pdf-inspector" }
+            pkg.homepage = "https://github.com/jesko2004/pdf-inspector/tree/main/wasm"
             pkg.publishConfig = { access: "public" }
             fs.writeFileSync(path, JSON.stringify(pkg, null, 2) + "\n")
           '

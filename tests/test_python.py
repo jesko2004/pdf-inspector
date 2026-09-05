@@ -213,10 +213,10 @@ class TestExtractTextInRegions:
     def test_file(self):
         results = pdf_inspector.extract_text_in_regions(
             fixture_path("thermo-freon12.pdf"),
-            [(0, [[0.0, 0.0, 600.0, 100.0]])],
+            [(1, [[0.0, 0.0, 600.0, 100.0]])],
         )
         assert len(results) == 1
-        assert results[0].page == 0
+        assert results[0].page == 1
         assert len(results[0].regions) == 1
         assert isinstance(results[0].regions[0].text, str)
         assert isinstance(results[0].regions[0].needs_ocr, bool)
@@ -225,17 +225,17 @@ class TestExtractTextInRegions:
         data = fixture_bytes("thermo-freon12.pdf")
         results = pdf_inspector.extract_text_in_regions_bytes(
             data,
-            [(0, [[0.0, 0.0, 600.0, 100.0]])],
+            [(1, [[0.0, 0.0, 600.0, 100.0]])],
         )
         assert len(results) == 1
-        assert results[0].page == 0
+        assert results[0].page == 1
         assert len(results[0].regions) == 1
         assert isinstance(results[0].regions[0].text, str)
 
     def test_repr(self):
         results = pdf_inspector.extract_text_in_regions(
             fixture_path("thermo-freon12.pdf"),
-            [(0, [[0.0, 0.0, 600.0, 100.0]])],
+            [(1, [[0.0, 0.0, 600.0, 100.0]])],
         )
         r = repr(results[0])
         assert "PageRegionTexts" in r
@@ -245,7 +245,7 @@ class TestExtractTextInRegions:
     def test_multiple_regions(self):
         results = pdf_inspector.extract_text_in_regions(
             fixture_path("thermo-freon12.pdf"),
-            [(0, [[0.0, 0.0, 300.0, 100.0], [300.0, 0.0, 600.0, 100.0]])],
+            [(1, [[0.0, 0.0, 300.0, 100.0], [300.0, 0.0, 600.0, 100.0]])],
         )
         assert len(results) == 1
         assert len(results[0].regions) == 2
@@ -254,19 +254,19 @@ class TestExtractTextInRegions:
         results = pdf_inspector.extract_text_in_regions(
             fixture_path("thermo-freon12.pdf"),
             [
-                (0, [[0.0, 0.0, 600.0, 100.0]]),
                 (1, [[0.0, 0.0, 600.0, 100.0]]),
+                (2, [[0.0, 0.0, 600.0, 100.0]]),
             ],
         )
         assert len(results) == 2
-        assert results[0].page == 0
-        assert results[1].page == 1
+        assert results[0].page == 1
+        assert results[1].page == 2
 
     def test_malformed_region_raises_value_error(self):
         with pytest.raises(ValueError, match="Invalid region"):
             pdf_inspector.extract_text_in_regions(
                 fixture_path("thermo-freon12.pdf"),
-                [(0, [[0.0, 0.0, 600.0]])],
+                [(1, [[0.0, 0.0, 600.0]])],
             )
 
 
@@ -281,7 +281,7 @@ class TestExtractPagesMarkdown:
             fixture_path("thermo-freon12.pdf")
         )
         assert len(result.pages) == 3
-        assert [p.page for p in result.pages] == [0, 1, 2]
+        assert [p.page for p in result.pages] == [1, 2, 3]
         assert all(isinstance(p.markdown, str) for p in result.pages)
 
     def test_bytes_default_returns_all_pages(self):
@@ -291,9 +291,9 @@ class TestExtractPagesMarkdown:
 
     def test_selected_pages_preserve_order(self):
         result = pdf_inspector.extract_pages_markdown(
-            fixture_path("thermo-freon12.pdf"), pages=[2, 0]
+            fixture_path("thermo-freon12.pdf"), pages=[3, 1]
         )
-        assert [p.page for p in result.pages] == [2, 0]
+        assert [p.page for p in result.pages] == [3, 1]
 
     def test_bytes_selected_pages_preserve_order(self):
         data = fixture_bytes("thermo-freon12.pdf")
@@ -303,7 +303,7 @@ class TestExtractPagesMarkdown:
 
     def test_page_fields(self):
         result = pdf_inspector.extract_pages_markdown(
-            fixture_path("thermo-freon12.pdf"), pages=[0]
+            fixture_path("thermo-freon12.pdf"), pages=[1]
         )
         page = result.pages[0]
         assert isinstance(page.page, int)
@@ -332,7 +332,7 @@ class TestExtractPagesMarkdown:
 
     def test_repr(self):
         result = pdf_inspector.extract_pages_markdown(
-            fixture_path("thermo-freon12.pdf"), pages=[0]
+            fixture_path("thermo-freon12.pdf"), pages=[1]
         )
         assert "PagesExtractionResult" in repr(result)
         assert "PageMarkdown" in repr(result.pages[0])

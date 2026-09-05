@@ -1,11 +1,6 @@
 name: Publish Rust crate
 
 on:
-  push:
-    branches: [main]
-    paths: ['Cargo.toml']
-  # Manual fallback: retry a publish that failed after the version was
-  # already merged (a plain re-push won't register as a version change).
   workflow_dispatch:
 
 permissions:
@@ -57,7 +52,7 @@ jobs:
           fi
 
           HTTP_STATUS=$(curl --silent --show-error --output /tmp/crate-version.json --write-out "%{http_code}" \
-            -H "User-Agent: firecrawl/pdf-inspector publish workflow (https://github.com/firecrawl/pdf-inspector)" \
+            -H "User-Agent: jesko2004/pdf-inspector publish workflow (https://github.com/jesko2004/pdf-inspector)" \
             "https://crates.io/api/v1/crates/pdf-inspector/$NEW_VERSION")
 
           case "$HTTP_STATUS" in

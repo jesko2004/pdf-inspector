@@ -1,11 +1,6 @@
 name: Publish npm package
 
 on:
-  push:
-    branches: [main]
-    paths: ['napi/package.json']
-  # Manual fallback: retry a publish that failed partway (per-package
-  # already-published checks make re-runs idempotent).
   workflow_dispatch:
 
 permissions:
@@ -170,7 +165,7 @@ jobs:
                 files: [`pdf-inspector.${suffix}.node`],
                 license: "MIT",
                 engines: { node: ">= 10" },
-                repository: { type: "git", url: "https://github.com/firecrawl/pdf-inspector" },
+                repository: { type: "git", url: "https://github.com/jesko2004/pdf-inspector" },
                 publishConfig: { access: "public" },
                 ...meta,
               }

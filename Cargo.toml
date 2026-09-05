@@ -3,10 +3,10 @@ name = "pdf-inspector"
 version = "0.1.7"
 edition = "2021"
 autobins = false
-authors = ["Firecrawl Team"]
+authors = ["jesko2004", "Firecrawl Team"]
 description = "Fast PDF inspection, classification, and text extraction with smart scanned vs text-based detection"
 license = "MIT"
-repository = "https://github.com/firecrawl/pdf-inspector"
+repository = "https://github.com/jesko2004/pdf-inspector"
 readme = "docs/rust-api.md"
 # Explicit allowlist: crates.io caps uploads at 10 MiB and tests/fixtures
 # alone exceeds that. external/bcmaps ships in the crate — tounicode.rs

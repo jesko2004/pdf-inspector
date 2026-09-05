@@ -1,13 +1,13 @@
 # pdf-inspector
 
 [![Crates.io](https://img.shields.io/crates/v/pdf-inspector.svg)](https://crates.io/crates/pdf-inspector)
-[![npm](https://img.shields.io/npm/v/@firecrawl/pdf-inspector.svg)](https://www.npmjs.com/package/@firecrawl/pdf-inspector)
+[![Repository](https://img.shields.io/badge/repository-jesko2004%2Fpdf--inspector-blue)](https://github.com/jesko2004/pdf-inspector)
 [![PyPI](https://img.shields.io/pypi/v/pdf-inspector.svg)](https://pypi.org/project/pdf-inspector/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Fast Rust library for PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Includes bindings for [Python](docs/python.md), [Node.js](napi/README.md), and [browser WebAssembly](wasm/README.md).
 
-Built by [Firecrawl](https://firecrawl.dev) to handle text-based PDFs locally in under 200ms, skipping expensive OCR services for the ~54% of PDFs that don't need them.
+Maintained by [jesko2004](https://github.com/jesko2004). Originally built by [Firecrawl](https://firecrawl.dev) and retained under the MIT license.
 
 ## Features
 
@@ -44,6 +44,10 @@ Use the [paired benchmark harness](docs/benchmarking.md) to compare two local bu
 
 ## Quick start
 
+All public APIs use **1-indexed PDF page numbers**: the first page is `1`.
+Passing page `0` returns an explicit error. Internal Rust collection indices
+and structured-table row/column indices remain 0-indexed.
+
 ### Python
 
 ```bash
@@ -63,6 +67,9 @@ print(result.markdown)   # Markdown string or None
 
 ### Node.js
 
+The npm package below is the compatible upstream release. Builds from this
+repository identify their source as `jesko2004/pdf-inspector`.
+
 ```bash
 npm install @firecrawl/pdf-inspector
 ```
@@ -79,6 +86,8 @@ console.log(result.markdown);  // Markdown string or null
 > Full API reference: [napi/README.md](napi/README.md)
 
 ### Browser WebAssembly
+
+The npm package below is the compatible upstream release.
 
 ```bash
 npm install @firecrawl/pdf-inspector-wasm

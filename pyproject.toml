@@ -19,11 +19,12 @@ classifiers = [
     "Operating System :: OS Independent",
     "Topic :: Text Processing",
 ]
+maintainers = [{ name = "jesko2004" }]
 
 [project.urls]
-Homepage = "https://github.com/firecrawl/pdf-inspector"
-Repository = "https://github.com/firecrawl/pdf-inspector"
-Documentation = "https://github.com/firecrawl/pdf-inspector/blob/main/docs/python.md"
+Homepage = "https://github.com/jesko2004/pdf-inspector"
+Repository = "https://github.com/jesko2004/pdf-inspector"
+Documentation = "https://github.com/jesko2004/pdf-inspector/blob/main/docs/python.md"
 
 [tool.maturin]
 features = ["python"]

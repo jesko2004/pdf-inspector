@@ -2,7 +2,7 @@
 
 Fast PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Pure Rust, no ML models, no external services; the only PDF dependency is [lopdf](https://crates.io/crates/lopdf). Also available for [Python](https://pypi.org/project/pdf-inspector/) and [Node.js](https://www.npmjs.com/package/@firecrawl/pdf-inspector).
 
-Built by [Firecrawl](https://firecrawl.dev) to handle text-based PDFs locally in under 200ms, skipping expensive OCR services for the ~54% of PDFs that don't need them.
+Maintained by [jesko2004](https://github.com/jesko2004). Originally built by [Firecrawl](https://firecrawl.dev) and retained under the MIT license.
 
 ## Features
 
@@ -24,7 +24,7 @@ Built by [Firecrawl](https://firecrawl.dev) to handle text-based PDFs locally in
 | pymupdf4llm | 0.735 | 0.886 | 0.401 | 0.424 | 17.117s |
 | markitdown | 0.589 | 0.844 | 0.273 | 0.000 | 16.165s |
 
-Refreshed July 31, 2026, on Apple M4 Pro; speed is the median of five complete corpus runs after an excluded warm-up. Full methodology and versions are in the [repo README](https://github.com/firecrawl/pdf-inspector#benchmark), with raw timings and artifacts in the [results branch](https://github.com/firecrawl/opendataloader-bench/tree/abi/pdf-parser-benchmark-results).
+Refreshed July 31, 2026, on Apple M4 Pro; speed is the median of five complete corpus runs after an excluded warm-up. Full methodology and versions are in the [repo README](https://github.com/jesko2004/pdf-inspector#benchmark), with raw timings and artifacts in the [results branch](https://github.com/firecrawl/opendataloader-bench/tree/abi/pdf-parser-benchmark-results).
 
 ## Install
 
@@ -36,7 +36,7 @@ For the latest unreleased changes, use the git dependency instead:
 
 ```toml
 [dependencies]
-pdf-inspector = { git = "https://github.com/firecrawl/pdf-inspector" }
+pdf-inspector = { git = "https://github.com/jesko2004/pdf-inspector" }
 ```
 
 The crate also ships CLI binaries — `pdf2md` (PDF → Markdown, with `--json`, `--pages`, `--select-pages`, and the opt-in token-saving `--compact` profile) and `detect-pdf` (classification, with `--analyze --json`):
@@ -120,10 +120,13 @@ let result = process_pdf_mem(&bytes)?;
 Extract per-page Markdown (one string per page, plus document-wide layout
 metadata):
 
+Every public page input and result is 1-indexed. Page `0` returns
+`PdfError::InvalidPageNumber(0)`.
+
 ```rust
 use pdf_inspector::extract_pages_markdown;
 
-// Pass `None` for every page in document order, or a slice of 0-indexed
+// Pass `None` for every page in document order, or a slice of 1-indexed
 // pages to restrict the output (caller-supplied order is preserved).
 let result = extract_pages_markdown("document.pdf", None)?;
 
@@ -180,6 +183,6 @@ Low-level detection functions are also available via the `detector` module (`det
 | `LayoutComplexity` | Layout analysis: is_complex, pages_with_tables, pages_with_columns |
 | `TextItem` | Text with position, font info, and page number |
 | `MarkdownOptions` | Configuration for Markdown formatting (page numbers, etc.) |
-| `PageMarkdown` | Per-page result: page (0-indexed), markdown, needs_ocr |
+| `PageMarkdown` | Per-page result: page (1-indexed), markdown, needs_ocr |
 | `PagesExtractionResult` | Per-page output + 1-indexed pages_with_tables / pages_with_columns / pages_needing_ocr, is_complex |
 | `PdfError` | `Io`, `Parse`, `Encrypted`, `InvalidStructure`, `NotAPdf` |
