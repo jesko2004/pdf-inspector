@@ -2,7 +2,7 @@
 
 Fast PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Python bindings via [PyO3](https://pyo3.rs) for the [pdf-inspector](https://github.com/jesko2004/pdf-inspector) Rust library.
 
-Maintained by [jesko2004](https://github.com/jesko2004). Originally built by [Firecrawl](https://firecrawl.dev) and retained under the MIT license.
+Created and maintained as the [jesko2004/pdf-inspector](https://github.com/jesko2004/pdf-inspector) project.
 
 ## Features
 
@@ -12,29 +12,11 @@ Maintained by [jesko2004](https://github.com/jesko2004). Originally built by [Fi
 - **Robust text decoding** — CID/Type0 fonts via ToUnicode CMaps, plus automatic flagging of broken encodings so callers can fall back to OCR.
 - **Lightweight** — native Rust core, no ML models, no external services; ships type stubs.
 
-## Benchmark
-
-[opendataloader-bench](https://github.com/opendataloader-project/opendataloader-bench) corpus (200 PDFs), local engines without model-based PDF parsing; OCR disabled. Scores 0–1, higher is better:
-
-| Engine | Overall | Reading order | Tables (TEDS) | Headings | Speed |
-|---|---|---|---|---|---|
-| **pdf-inspector** | **0.875** | **0.915** | **0.814** | 0.788 | **0.470s** |
-| liteparse | 0.873 | 0.913 | 0.693 | **0.811** | 0.750s |
-| opendataloader | 0.831 | 0.902 | 0.489 | 0.739 | 2.569s |
-| pymupdf4llm | 0.735 | 0.886 | 0.401 | 0.424 | 17.117s |
-| markitdown | 0.589 | 0.844 | 0.273 | 0.000 | 16.165s |
-
-Refreshed July 31, 2026, on Apple M4 Pro; speed is the median of five complete corpus runs after an excluded warm-up. Full methodology and versions are in the [repo README](https://github.com/jesko2004/pdf-inspector#benchmark), with raw timings and artifacts in the [results branch](https://github.com/firecrawl/opendataloader-bench/tree/abi/pdf-parser-benchmark-results).
-
 ## Install
 
 ```bash
-pip install pdf-inspector
-```
-
-Prebuilt wheels cover CPython ≥3.8 on Linux (x86_64, aarch64), macOS (Intel, Apple Silicon), and Windows (x64). Other platforms build from source, which requires a Rust toolchain. For local development in a repo checkout:
-
-```bash
+git clone https://github.com/jesko2004/pdf-inspector.git
+cd pdf-inspector
 pip install maturin
 maturin develop --release
 ```

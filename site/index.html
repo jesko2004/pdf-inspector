@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>pdf-inspector — fast, open-source PDF to Markdown</title>
-<meta name="description" content="A fast, open-source PDF parser for structured Markdown extraction, available through npm, PyPI, crates.io, and the command line.">
+<meta name="description" content="jesko2004's Rust PDF parser for structured Markdown extraction through CLI, Python, Node.js, and WebAssembly.">
 <meta name="theme-color" content="#f9f9f9">
 <meta property="og:title" content="pdf-inspector">
 <meta property="og:description" content="Fast PDF classification and structured Markdown extraction for Node.js, Python, Rust, and the command line.">
@@ -640,7 +640,7 @@
       <a href="#demo">Demo</a>
       <a href="#capabilities">Capabilities</a>
       <a href="#architecture">Architecture</a>
-      <a href="#benchmark">Benchmark</a>
+      <a href="#validation">Validation</a>
       <a href="#usage">Usage</a>
       <a class="github-link" href="https://github.com/jesko2004/pdf-inspector">GitHub <span aria-hidden="true">↗</span></a>
     </div>
@@ -656,7 +656,7 @@
           <div class="rust-label"><i aria-hidden="true">RS</i>Rust core</div>
         </div>
         <h1>PDF structure,<br><em>built for speed.</em></h1>
-        <p class="hero-copy">A Rust-powered, open-source parser that classifies PDFs and turns native text into clean, position-aware Markdown. Use it from Node.js or the bundled CLI, with packages also available from PyPI and crates.io.</p>
+        <p class="hero-copy">A Rust-powered, open-source parser by jesko2004 that classifies PDFs and turns native text into clean, position-aware Markdown. Use it from the CLI, Python, Node.js, or browser WebAssembly.</p>
         <div class="hero-actions">
           <a class="button button-primary" href="https://github.com/jesko2004/pdf-inspector">View on GitHub <span class="arrow" aria-hidden="true">↗</span></a>
           <a class="button" href="#demo">Try it locally <span class="arrow" aria-hidden="true">↓</span></a>
@@ -667,12 +667,12 @@
       <div class="terminal" aria-label="pdf-inspector command line example">
         <div class="terminal-head">
           <div class="term-dots" aria-hidden="true"><i></i><i></i><i></i></div>
-          <span>npm CLI · local</span>
+          <span>Rust CLI · local</span>
         </div>
-        <pre><span class="prompt">$</span> npm i -g @firecrawl/pdf-inspector
-<span class="term-muted">   installed the native package + CLI</span>
+        <pre><span class="prompt">$</span> cargo install --git https://github.com/jesko2004/pdf-inspector.git
+<span class="term-muted">   built the personal project CLI</span>
 
-<span class="prompt">$</span> pdf-inspector annual-report.pdf
+<span class="prompt">$</span> pdf2md annual-report.pdf
 <span class="term-key"># Annual report 2025</span>
 
 ## Financial highlights
@@ -686,33 +686,33 @@
       </div>
     </div>
 
-    <div class="package-row" id="packages" aria-label="Package registries">
-      <a class="package" href="https://www.npmjs.com/package/@firecrawl/pdf-inspector">
+    <div class="package-row" id="packages" aria-label="Project interfaces">
+      <a class="package" href="https://github.com/jesko2004/pdf-inspector/tree/main/napi">
         <span class="package-heading">
           <span class="registry-icon registry-npm" aria-hidden="true">npm</span>
           <span class="registry-name"><strong>npm</strong><small>Node.js + CLI</small></span>
           <span class="package-arrow" aria-hidden="true">↗</span>
         </span>
-        <code>npm i @firecrawl/pdf-inspector</code>
+        <code>cd napi &amp;&amp; npm install &amp;&amp; npm run build</code>
       </a>
-      <a class="package" href="https://pypi.org/project/pdf-inspector/">
+      <a class="package" href="https://github.com/jesko2004/pdf-inspector/blob/main/docs/python.md">
         <span class="package-heading">
           <span class="registry-icon registry-pypi" aria-hidden="true">Py</span>
           <span class="registry-name"><strong>PyPI</strong><small>Python</small></span>
           <span class="package-arrow" aria-hidden="true">↗</span>
         </span>
-        <code>pip install pdf-inspector</code>
+        <code>maturin develop --release</code>
       </a>
-      <a class="package" href="https://crates.io/crates/pdf-inspector">
+      <a class="package" href="https://github.com/jesko2004/pdf-inspector/blob/main/docs/rust-api.md">
         <span class="package-heading">
           <span class="registry-icon registry-crates" aria-hidden="true">Cr</span>
           <span class="registry-name"><strong>crates.io</strong><small>Rust</small></span>
           <span class="package-arrow" aria-hidden="true">↗</span>
         </span>
-        <code>cargo add pdf-inspector</code>
+        <code>cargo install --git https://github.com/jesko2004/pdf-inspector.git</code>
       </a>
     </div>
-    <p class="package-note">Registry links point to compatible upstream releases. This repository does not publish under the inherited package names.</p>
+    <p class="package-note">Source-build instructions for the personal jesko2004/pdf-inspector repository.</p>
   </div>
 
   <section id="demo" class="full-rule">
@@ -804,7 +804,7 @@
           <article class="capability">
             <div class="cap-id"><span>06</span><span>napi/</span></div>
             <h3>Packaged for your stack</h3>
-            <p>Install from npm, PyPI, or crates.io. The npm package also includes TypeScript definitions and the bundled pdf-inspector CLI.</p>
+            <p>Use the personal Node.js, Python, Rust, and WebAssembly interfaces, all backed by the same Rust implementation.</p>
           </article>
         </div>
       </div>
@@ -843,41 +843,38 @@
               <p>Clean Markdown plus classification and extraction metadata.</p>
             </div>
           </div>
-          <div class="arch-foot">Call <code>processPdf</code> from Node.js, <code>process_pdf</code> from Python or Rust, or run the bundled <code>pdf-inspector</code> CLI. Every interface uses the same Rust pipeline.</div>
+          <div class="arch-foot">Call <code>processPdf</code> from Node.js, <code>process_pdf</code> from Python or Rust, or run the <code>pdf2md</code> CLI. Every interface uses the same Rust pipeline.</div>
         </div>
       </div>
     </div>
   </section>
 
-  <section id="benchmark" class="full-rule">
+  <section id="validation" class="full-rule">
     <div class="shell">
-      <div class="section-label pad"><span>[ <b>04</b> / 05 ]</span><span>Benchmark</span></div>
+      <div class="section-label pad"><span>[ <b>04</b> / 05 ]</span><span>Validation</span></div>
       <div class="section-body pad">
         <div class="section-intro">
-          <h2>Measured on<br>real documents.</h2>
-          <p>Evaluated on the <a class="text-link" href="https://github.com/opendataloader-project/opendataloader-bench">opendataloader-bench</a> corpus of 200 PDFs. This comparison covers local engines without model-based PDF parsing, with OCR disabled. Higher scores are better.</p>
+          <h2>Test on<br>your documents.</h2>
+          <p>Run the release binaries against a selected PDF corpus, save JSON analysis beside Markdown output, and compare results before each merge.</p>
         </div>
         <div class="benchmark-card">
-          <div class="benchmark-top"><span><strong>200 PDFs</strong> · OpenDataLoader benchmark</span><span>Apple M4 Pro · median of 3 runs</span></div>
+          <div class="benchmark-top"><span><strong>Local regression</strong> · repeatable commands</span><span>your PDFs · your baseline</span></div>
           <div class="table-scroll">
-            <table aria-label="PDF extraction benchmark results">
+            <table aria-label="PDF validation workflow">
               <thead>
-                <tr><th>Engine</th><th>Overall</th><th>Reading order</th><th>Tables</th><th>Headings</th><th>Complete run</th></tr>
+                <tr><th>Step</th><th>Command</th><th>Output</th><th>Checks</th><th>Page rule</th><th>Result</th></tr>
               </thead>
               <tbody>
-                <tr class="highlight"><td>pdf-inspector</td><td>0.875</td><td>0.915</td><td>0.814</td><td>0.788</td><td>2.8s</td></tr>
-                <tr><td>LiteParse</td><td>0.870</td><td>0.908</td><td>0.693</td><td>0.811</td><td>13.9s</td></tr>
-                <tr><td>OpenDataLoader</td><td>0.843</td><td>0.912</td><td>0.489</td><td>0.760</td><td>9.8s</td></tr>
-                <tr><td>PyMuPDF4LLM</td><td>0.735</td><td>0.886</td><td>0.401</td><td>0.424</td><td>15.5s</td></tr>
-                <tr><td>MarkItDown</td><td>0.583</td><td>0.879</td><td>0.000</td><td>0.000</td><td>6.7s</td></tr>
+                <tr class="highlight"><td>Analyze</td><td>detect-pdf --analyze --json</td><td>JSON</td><td>type, OCR, layout</td><td>1-based</td><td>review</td></tr>
+                <tr><td>Extract</td><td>pdf2md --pages</td><td>Markdown</td><td>text, tables, order</td><td>1-based</td><td>compare</td></tr>
               </tbody>
             </table>
           </div>
-          <div class="benchmark-note">Refreshed July 16, 2026. Scores use the benchmark’s NID, TEDS, and MHS evaluators.</div>
+          <div class="benchmark-note">Store approved Markdown as the baseline, then compare the same files after every code change.</div>
         </div>
         <div class="best-fit">
-          <strong>Best fit</strong>
-          <p>Native-text PDFs where speed, reading order, and table structure matter. pdf-inspector delivered the highest overall, reading-order, and table scores, along with the fastest complete run in this benchmark. That makes it a strong local default for reports, research papers, financial documents, invoices, and legal PDFs that need clean, structured Markdown without adding OCR latency or infrastructure.</p>
+          <strong>Recommended workflow</strong>
+          <p>Keep a small personal corpus covering native text, scanned pages, tables, columns, encrypted documents, and multilingual text. Review output changes before merging each pull request.</p>
         </div>
       </div>
     </div>
@@ -904,9 +901,9 @@
               <label for="rust" role="tab">Rust</label>
             </div>
             <div class="panels">
-              <div class="code-panel" id="panel-node" role="tabpanel"><pre><span class="cm">// npm i @firecrawl/pdf-inspector</span>
+              <div class="code-panel" id="panel-node" role="tabpanel"><pre><span class="cm">// cd napi &amp;&amp; npm install &amp;&amp; npm run build</span>
 <span class="kw">import</span> { readFileSync } <span class="kw">from</span> <span class="str">'node:fs'</span>;
-<span class="kw">import</span> { processPdf } <span class="kw">from</span> <span class="str">'@firecrawl/pdf-inspector'</span>;
+<span class="kw">import</span> { processPdf } <span class="kw">from</span> <span class="str">'./napi/index.js'</span>;
 
 <span class="kw">const</span> result = <span class="fn">processPdf</span>(
   <span class="fn">readFileSync</span>(<span class="str">'document.pdf'</span>)
@@ -916,21 +913,20 @@ console.<span class="fn">log</span>(result.pdfType);
 console.<span class="fn">log</span>(result.markdown);
 
 <span class="cm">// </span><a href="https://github.com/jesko2004/pdf-inspector/blob/main/napi/README.md">Full Node.js API reference ↗</a></pre></div>
-              <div class="code-panel" id="panel-cli" role="tabpanel"><pre><span class="cm"># run directly from npm</span>
-npx <span class="fn">@firecrawl/pdf-inspector</span> document.pdf
+              <div class="code-panel" id="panel-cli" role="tabpanel"><pre><span class="cm"># build the CLI from this repository</span>
+cargo build --release
 
-<span class="cm"># or install the bundled CLI globally</span>
-npm install -g <span class="fn">@firecrawl/pdf-inspector</span>
-<span class="fn">pdf-inspector</span> document.pdf
+<span class="cm"># convert PDF to Markdown</span>
+<span class="fn">pdf2md</span> document.pdf output.md --pages
 
 <span class="cm"># structured pipeline output</span>
-<span class="fn">pdf-inspector</span> document.pdf --json
+<span class="fn">pdf2md</span> document.pdf --json
 
 <span class="cm"># classification only</span>
-<span class="fn">pdf-inspector</span> detect document.pdf --json
+<span class="fn">detect-pdf</span> document.pdf --json
 
 <span class="cm"># </span><a href="https://github.com/jesko2004/pdf-inspector/blob/main/napi/README.md">Node.js and CLI reference ↗</a></pre></div>
-              <div class="code-panel" id="panel-python" role="tabpanel"><pre><span class="cm"># pip install pdf-inspector</span>
+              <div class="code-panel" id="panel-python" role="tabpanel"><pre><span class="cm"># pip install maturin &amp;&amp; maturin develop --release</span>
 <span class="kw">import</span> pdf_inspector
 
 result = pdf_inspector.<span class="fn">process_pdf</span>(<span class="str">"document.pdf"</span>)
@@ -940,7 +936,7 @@ result = pdf_inspector.<span class="fn">process_pdf</span>(<span class="str">"do
 <span class="fn">print</span>(result.pages_needing_ocr)
 
 <span class="cm"># </span><a href="https://github.com/jesko2004/pdf-inspector/blob/main/docs/python.md">Full Python API reference ↗</a></pre></div>
-              <div class="code-panel" id="panel-rust" role="tabpanel"><pre><span class="cm">// cargo add pdf-inspector</span>
+              <div class="code-panel" id="panel-rust" role="tabpanel"><pre><span class="cm">// package = "jesko-pdf-inspector"; lib = "pdf_inspector"</span>
 <span class="kw">use</span> pdf_inspector::process_pdf;
 
 <span class="kw">let</span> result = <span class="fn">process_pdf</span>(<span class="str">"document.pdf"</span>)?;
@@ -961,12 +957,12 @@ result = pdf_inspector.<span class="fn">process_pdf</span>(<span class="str">"do
 
 <footer class="full-rule">
   <div class="shell footer-main pad">
-    <div class="footer-brand"><span>Maintained by <a href="https://github.com/jesko2004">jesko2004</a> · Originally built by <a href="https://firecrawl.dev">Firecrawl</a> · MIT licensed</span></div>
+    <div class="footer-brand"><span>Created and maintained by <a href="https://github.com/jesko2004">jesko2004</a> · MIT licensed</span></div>
     <div class="footer-links">
       <a href="https://github.com/jesko2004/pdf-inspector">GitHub</a>
-      <a href="https://crates.io/crates/pdf-inspector">crates.io</a>
-      <a href="https://pypi.org/project/pdf-inspector/">PyPI</a>
-      <a href="https://www.npmjs.com/package/@firecrawl/pdf-inspector">npm</a>
+      <a href="https://github.com/jesko2004/pdf-inspector/blob/main/docs/rust-api.md">Rust</a>
+      <a href="https://github.com/jesko2004/pdf-inspector/blob/main/docs/python.md">Python</a>
+      <a href="https://github.com/jesko2004/pdf-inspector/tree/main/napi">Node.js</a>
       <a href="#top">Back to top ↑</a>
     </div>
   </div>
@@ -975,7 +971,7 @@ result = pdf_inspector.<span class="fn">process_pdf</span>(<span class="str">"do
 <script>
   (() => {
     const MAX_FILE_SIZE = 25 * 1024 * 1024;
-    const WASM_MODULE_URL = "https://cdn.jsdelivr.net/npm/@firecrawl/pdf-inspector-wasm@0.1.1/pdf_inspector_wasm.js";
+    const WASM_MODULE_URL = "../wasm/pkg/pdf_inspector_wasm.js";
     const input = document.querySelector("#pdf-input");
     const dropZone = document.querySelector("#drop-zone");
     const filePanel = document.querySelector("#demo-file");

@@ -4,16 +4,14 @@ Browser WebAssembly bindings for [pdf-inspector](https://github.com/jesko2004/pd
 
 ## Install
 
-The npm package below is the compatible upstream release.
-
 ```bash
-npm install @firecrawl/pdf-inspector-wasm
+wasm-pack build wasm --target web --out-dir pkg --release
 ```
 
 ## Usage
 
 ```ts
-import init, { processPdf } from "@firecrawl/pdf-inspector-wasm";
+import init, { processPdf } from "./pkg/pdf_inspector_wasm.js";
 
 await init();
 

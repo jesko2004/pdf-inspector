@@ -53,12 +53,12 @@ jobs:
 
           HTTP_STATUS=$(curl --silent --show-error --output /tmp/crate-version.json --write-out "%{http_code}" \
             -H "User-Agent: jesko2004/pdf-inspector publish workflow (https://github.com/jesko2004/pdf-inspector)" \
-            "https://crates.io/api/v1/crates/pdf-inspector/$NEW_VERSION")
+            "https://crates.io/api/v1/crates/jesko-pdf-inspector/$NEW_VERSION")
 
           case "$HTTP_STATUS" in
             200)
               echo "published=true" >> "$GITHUB_OUTPUT"
-              echo "pdf-inspector v$NEW_VERSION is already published"
+              echo "jesko-pdf-inspector v$NEW_VERSION is already published"
               ;;
             404)
               echo "published=false" >> "$GITHUB_OUTPUT"

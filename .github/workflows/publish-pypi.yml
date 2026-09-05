@@ -55,12 +55,12 @@ jobs:
           echo "changed=true" >> "$GITHUB_OUTPUT"
 
           HTTP_STATUS=$(curl --silent --show-error --output /tmp/pypi-version.json --write-out "%{http_code}" \
-            "https://pypi.org/pypi/pdf-inspector/$NEW_VERSION/json")
+            "https://pypi.org/pypi/jesko-pdf-inspector/$NEW_VERSION/json")
 
           case "$HTTP_STATUS" in
             200)
               echo "published=true" >> "$GITHUB_OUTPUT"
-              echo "pdf-inspector v$NEW_VERSION is already published to PyPI"
+              echo "jesko-pdf-inspector v$NEW_VERSION is already published to PyPI"
               ;;
             404)
               echo "published=false" >> "$GITHUB_OUTPUT"

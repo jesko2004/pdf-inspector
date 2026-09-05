@@ -2,7 +2,7 @@
 
 Fast PDF classification and region-based text extraction for Node.js/Bun. Native Rust performance via [napi-rs](https://napi.rs).
 
-Maintained by [jesko2004](https://github.com/jesko2004). Originally built by [Firecrawl](https://firecrawl.dev) and retained under the MIT license.
+Created and maintained as the [jesko2004/pdf-inspector](https://github.com/jesko2004/pdf-inspector) project.
 
 ## Features
 
@@ -12,32 +12,17 @@ Maintained by [jesko2004](https://github.com/jesko2004). Originally built by [Fi
 - **Robust text decoding** — CID/Type0 fonts via ToUnicode CMaps, plus automatic flagging of broken encodings so callers can fall back to OCR.
 - **Lightweight** — native Rust core via napi-rs, no ML models, no external services; ~5–6 MB platform binary, TypeScript definitions included.
 
-## Benchmark
-
-[opendataloader-bench](https://github.com/opendataloader-project/opendataloader-bench) corpus (200 PDFs), local engines without model-based PDF parsing; OCR disabled. Scores 0–1, higher is better:
-
-| Engine | Overall | Reading order | Tables (TEDS) | Headings | Speed |
-|---|---|---|---|---|---|
-| **pdf-inspector** | **0.875** | **0.915** | **0.814** | 0.788 | **0.470s** |
-| liteparse | 0.873 | 0.913 | 0.693 | **0.811** | 0.750s |
-| opendataloader | 0.831 | 0.902 | 0.489 | 0.739 | 2.569s |
-| pymupdf4llm | 0.735 | 0.886 | 0.401 | 0.424 | 17.117s |
-| markitdown | 0.589 | 0.844 | 0.273 | 0.000 | 16.165s |
-
-Refreshed July 31, 2026, on Apple M4 Pro; speed is the median of five complete corpus runs after an excluded warm-up. Full methodology and versions are in the [repo README](https://github.com/jesko2004/pdf-inspector#benchmark), with raw timings and artifacts in the [results branch](https://github.com/firecrawl/opendataloader-bench/tree/abi/pdf-parser-benchmark-results).
-
 ## Install
 
-The npm package below is the compatible upstream release. Builds from this
-repository identify their source as `jesko2004/pdf-inspector`.
-
 ```bash
-npm install @firecrawl/pdf-inspector
-# or
-bun add @firecrawl/pdf-inspector
+git clone https://github.com/jesko2004/pdf-inspector.git
+cd pdf-inspector/napi
+npm install
+npm run build
 ```
 
-Prebuilt binaries for **Linux x64**, **macOS ARM64**, and **Windows x64** — npm installs only the one matching your platform. No Rust toolchain needed.
+The personal npm distribution name is `@jesko2004/pdf-inspector`. Until its
+first registry release, use the source build above.
 
 ## API
 
@@ -49,7 +34,7 @@ and passing `0` throws an error.
 Classify a PDF as TextBased, Scanned, Mixed, or ImageBased (~10-50ms). Returns which pages need OCR.
 
 ```typescript
-import { classifyPdf } from '@firecrawl/pdf-inspector'
+import { classifyPdf } from './index.js'
 import { readFileSync } from 'fs'
 
 const pdf = readFileSync('document.pdf')
@@ -68,7 +53,7 @@ Extract text within bounding-box regions from a PDF. Designed for hybrid OCR pip
 Each region result includes a `needsOcr` flag that signals unreliable extraction (empty text, GID-encoded fonts, garbage text, encoding issues). When the cause is a suspected garbled text layer, `ocrReason` is set to `"suspected_garbled_text"`.
 
 ```typescript
-import { extractTextInRegions } from '@firecrawl/pdf-inspector'
+import { extractTextInRegions } from './index.js'
 
 const result = extractTextInRegions(pdf, [
   {
@@ -122,9 +107,9 @@ Prebuilt binaries ship as platform-specific packages installed automatically via
 
 | Platform | Architecture | Package |
 |----------|-------------|---------|
-| Linux    | x64 (glibc) | `@firecrawl/pdf-inspector-linux-x64-gnu` |
-| macOS    | ARM64       | `@firecrawl/pdf-inspector-darwin-arm64` |
-| Windows  | x64         | `@firecrawl/pdf-inspector-win32-x64-msvc` |
+| Linux    | x64 (glibc) | `@jesko2004/pdf-inspector-linux-x64-gnu` |
+| macOS    | ARM64       | `@jesko2004/pdf-inspector-darwin-arm64` |
+| Windows  | x64         | `@jesko2004/pdf-inspector-win32-x64-msvc` |
 
 ## License
 

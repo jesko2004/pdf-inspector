@@ -45,7 +45,7 @@ jobs:
             echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
 
-          if ! npm view "@firecrawl/pdf-inspector-wasm" name >/dev/null 2>&1; then
+          if ! npm view "@jesko2004/pdf-inspector-wasm" name >/dev/null 2>&1; then
             echo "package_exists=false" >> "$GITHUB_OUTPUT"
             echo "published=false" >> "$GITHUB_OUTPUT"
             echo "The initial package must be published once before trusted publishing can be configured."
@@ -53,7 +53,7 @@ jobs:
           fi
 
           echo "package_exists=true" >> "$GITHUB_OUTPUT"
-          if npm view "@firecrawl/pdf-inspector-wasm@$NEW_VERSION" version >/dev/null 2>&1; then
+          if npm view "@jesko2004/pdf-inspector-wasm@$NEW_VERSION" version >/dev/null 2>&1; then
             echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "published=false" >> "$GITHUB_OUTPUT"
@@ -84,7 +84,7 @@ jobs:
         run: cargo install wasm-pack --version 0.15.0 --locked
 
       - name: Build browser package
-        run: wasm-pack build wasm --target web --scope firecrawl --out-dir pkg --release
+        run: wasm-pack build wasm --target web --scope jesko2004 --out-dir pkg --release
 
       - name: Prepare package metadata
         run: |
@@ -92,9 +92,9 @@ jobs:
             const fs = require("fs")
             const path = "wasm/pkg/package.json"
             const pkg = JSON.parse(fs.readFileSync(path, "utf8"))
-            pkg.name = "@firecrawl/pdf-inspector-wasm"
+            pkg.name = "@jesko2004/pdf-inspector-wasm"
             pkg.description = "Browser WebAssembly bindings for the pdf-inspector Rust PDF parser"
-            pkg.keywords = ["pdf", "pdf-parser", "webassembly", "wasm", "markdown", "rust", "firecrawl"]
+            pkg.keywords = ["pdf", "pdf-parser", "webassembly", "wasm", "markdown", "rust"]
             pkg.repository = { type: "git", url: "https://github.com/jesko2004/pdf-inspector" }
             pkg.homepage = "https://github.com/jesko2004/pdf-inspector/tree/main/wasm"
             pkg.publishConfig = { access: "public" }

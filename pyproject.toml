@@ -3,9 +3,8 @@ requires = ["maturin>=1.0,<2.0"]
 build-backend = "maturin"
 
 [project]
-name = "pdf-inspector"
-# Bump this to publish to PyPI — CI publishes automatically when the version
-# changes on main (same flow as napi/package.json for npm).
+name = "jesko-pdf-inspector"
+# Bump this before manually publishing a new PyPI release.
 version = "0.2.6"
 description = "Fast PDF inspection, classification, and text extraction with smart scanned vs text-based detection"
 readme = "docs/python.md"

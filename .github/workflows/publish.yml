@@ -136,7 +136,7 @@ jobs:
             base=$(basename "$node_file")
             suffix=${base#pdf-inspector.}
             suffix=${suffix%.node}
-            pkg="@firecrawl/pdf-inspector-$suffix"
+            pkg="@jesko2004/pdf-inspector-$suffix"
 
             if npm view "$pkg@$VERSION" version >/dev/null 2>&1; then
               echo "$pkg@$VERSION already published — skipping"
@@ -158,9 +158,9 @@ jobs:
                 process.exit(1)
               }
               const pkg = {
-                name: `@firecrawl/pdf-inspector-${suffix}`,
+                name: `@jesko2004/pdf-inspector-${suffix}`,
                 version,
-                description: `Prebuilt ${suffix} binary for @firecrawl/pdf-inspector`,
+                description: `Prebuilt ${suffix} binary for @jesko2004/pdf-inspector`,
                 main: `pdf-inspector.${suffix}.node`,
                 files: [`pdf-inspector.${suffix}.node`],
                 license: "MIT",
@@ -182,8 +182,8 @@ jobs:
         run: |
           VERSION="${{ needs.check-version.outputs.version }}"
 
-          if npm view "@firecrawl/pdf-inspector@$VERSION" version >/dev/null 2>&1; then
-            echo "@firecrawl/pdf-inspector@$VERSION already published — skipping"
+          if npm view "@jesko2004/pdf-inspector@$VERSION" version >/dev/null 2>&1; then
+            echo "@jesko2004/pdf-inspector@$VERSION already published — skipping"
             exit 0
           fi
 
