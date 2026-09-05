@@ -10,6 +10,7 @@ class PdfResult:
     page_count: int
     processing_time_ms: int
     pages_needing_ocr: list[int]
+    """1-indexed page numbers that need OCR."""
     title: Optional[str]
     confidence: float
     is_complex_layout: bool
@@ -23,7 +24,7 @@ class PdfClassification:
     """'text_based', 'scanned', 'image_based', or 'mixed'."""
     page_count: int
     pages_needing_ocr: list[int]
-    """0-indexed page numbers that need OCR."""
+    """1-indexed page numbers that need OCR."""
     confidence: float
 
 class TextItem:
@@ -36,6 +37,7 @@ class TextItem:
     font: str
     font_size: float
     page: int
+    """1-indexed page number."""
     is_bold: bool
     is_italic: bool
     is_underline: bool
@@ -51,13 +53,13 @@ class RegionText:
 class PageRegionTexts:
     """Extracted text for one page's regions."""
     page: int
-    """0-indexed page number."""
+    """1-indexed page number."""
     regions: list[RegionText]
 
 class PageMarkdown:
     """Per-page markdown extraction result."""
     page: int
-    """0-indexed page number."""
+    """1-indexed page number."""
     markdown: str
     """Formatted markdown for this page (empty string when needs_ocr is True)."""
     needs_ocr: bool
@@ -93,7 +95,7 @@ def detect_pdf_bytes(data: bytes) -> PdfResult:
     ...
 
 def classify_pdf(path: str) -> PdfClassification:
-    """Lightweight classification — type, page count, and OCR pages (0-indexed)."""
+    """Lightweight classification — type, page count, and OCR pages (1-indexed)."""
     ...
 
 def classify_pdf_bytes(data: bytes) -> PdfClassification:
@@ -124,7 +126,7 @@ def extract_text_in_regions(
 
     Args:
         path: Path to the PDF file.
-        page_regions: List of (page_0indexed, [[x1, y1, x2, y2], ...]) tuples.
+        page_regions: List of (page_1indexed, [[x1, y1, x2, y2], ...]) tuples.
     """
     ...
 
@@ -136,7 +138,7 @@ def extract_text_in_regions_bytes(
 
     Args:
         data: PDF file contents as bytes.
-        page_regions: List of (page_0indexed, [[x1, y1, x2, y2], ...]) tuples.
+        page_regions: List of (page_1indexed, [[x1, y1, x2, y2], ...]) tuples.
     """
     ...
 
@@ -148,7 +150,7 @@ def extract_pages_markdown(
 
     Args:
         path: Path to the PDF file.
-        pages: Optional list of 0-indexed pages. When ``None`` (default), every
+        pages: Optional list of 1-indexed pages. When ``None`` (default), every
             page is returned in document order. Otherwise, output matches the
             caller-supplied order.
 

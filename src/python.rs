@@ -99,7 +99,7 @@ pub struct PyPdfClassification {
     /// Total number of pages.
     #[pyo3(get)]
     pub page_count: u32,
-    /// 0-indexed page numbers that need OCR.
+    /// 1-indexed page numbers that need OCR.
     #[pyo3(get)]
     pub pages_needing_ocr: Vec<u32>,
     /// Detection confidence (0.0-1.0).
@@ -151,7 +151,7 @@ impl PyRegionText {
 #[pyclass(name = "PageRegionTexts")]
 #[derive(Clone)]
 pub struct PyPageRegionTexts {
-    /// 0-indexed page number.
+    /// 1-indexed page number.
     #[pyo3(get)]
     pub page: u32,
     /// Per-region results, parallel to the input regions.
@@ -178,7 +178,7 @@ impl PyPageRegionTexts {
 #[pyclass(name = "PageMarkdown")]
 #[derive(Clone)]
 pub struct PyPageMarkdown {
-    /// 0-indexed page number.
+    /// 1-indexed page number.
     #[pyo3(get)]
     pub page: u32,
     /// Formatted markdown for this page.
@@ -474,7 +474,7 @@ fn detect_pdf_bytes(data: &[u8]) -> PyResult<PyPdfResult> {
 
 /// Lightweight PDF classification — returns type, page count, and OCR pages.
 /// Faster than detect_pdf as it skips building the full PdfProcessResult.
-/// Pages in pages_needing_ocr are 0-indexed.
+/// Pages in pages_needing_ocr are 1-indexed.
 #[pyfunction]
 fn classify_pdf(path: &str) -> PyResult<PyPdfClassification> {
     let data = std::fs::read(path).map_err(|e| PyValueError::new_err(e.to_string()))?;
@@ -482,7 +482,7 @@ fn classify_pdf(path: &str) -> PyResult<PyPdfClassification> {
 }
 
 /// Lightweight PDF classification from bytes.
-/// Pages in pages_needing_ocr are 0-indexed.
+/// Pages in pages_needing_ocr are 1-indexed.
 #[pyfunction]
 fn classify_pdf_bytes(data: &[u8]) -> PyResult<PyPdfClassification> {
     let result = crate::classify_pdf_mem(data).map_err(to_py_err)?;
@@ -542,7 +542,7 @@ fn extract_text_with_positions_bytes(
 ///
 /// Args:
 ///     path: Path to the PDF file.
-///     page_regions: List of (page_0indexed, [[x1, y1, x2, y2], ...]) tuples.
+///     page_regions: List of (page_1indexed, [[x1, y1, x2, y2], ...]) tuples.
 ///         Coordinates are PDF points with top-left origin.
 ///
 /// Returns:
@@ -560,7 +560,7 @@ fn extract_text_in_regions(
 ///
 /// Args:
 ///     data: PDF file contents as bytes.
-///     page_regions: List of (page_0indexed, [[x1, y1, x2, y2], ...]) tuples.
+///     page_regions: List of (page_1indexed, [[x1, y1, x2, y2], ...]) tuples.
 ///         Coordinates are PDF points with top-left origin.
 ///
 /// Returns:
@@ -584,7 +584,7 @@ fn extract_text_in_regions_bytes(
 ///
 /// Args:
 ///     path: Path to the PDF file.
-///     pages: Optional list of 0-indexed pages. When None (default), every
+///     pages: Optional list of 1-indexed pages. When None (default), every
 ///         page is returned in document order. When provided, output
 ///         matches the caller-supplied order.
 ///

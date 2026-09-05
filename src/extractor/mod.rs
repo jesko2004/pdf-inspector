@@ -92,6 +92,7 @@ pub(crate) fn extract_text_with_positions_and_rects<P: AsRef<Path>>(
 ) -> Result<PageExtraction, PdfError> {
     crate::validate_pdf_file(&path)?;
     let (doc, _) = crate::load_document_from_path(&path)?;
+    crate::validate_page_numbers(page_filter.into_iter().flatten().copied())?;
     let font_cmaps = FontCMaps::from_doc(&doc);
     let (extraction, _thresholds, _gid_pages) =
         extract_positioned_text_from_doc(&doc, &font_cmaps, page_filter)?;
@@ -119,6 +120,7 @@ pub(crate) fn extract_text_with_positions_mem_and_rects(
 ) -> Result<PageExtraction, PdfError> {
     crate::validate_pdf_bytes(buffer)?;
     let (doc, _) = crate::load_document_from_mem(buffer)?;
+    crate::validate_page_numbers(page_filter.into_iter().flatten().copied())?;
     let font_cmaps = FontCMaps::from_doc(&doc);
     let (extraction, _thresholds, _gid_pages) =
         extract_positioned_text_from_doc(&doc, &font_cmaps, page_filter)?;

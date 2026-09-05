@@ -1,13 +1,8 @@
 # pdf-inspector
 
-[![Crates.io](https://img.shields.io/crates/v/pdf-inspector.svg)](https://crates.io/crates/pdf-inspector)
-[![npm](https://img.shields.io/npm/v/@firecrawl/pdf-inspector.svg)](https://www.npmjs.com/package/@firecrawl/pdf-inspector)
-[![PyPI](https://img.shields.io/pypi/v/pdf-inspector.svg)](https://pypi.org/project/pdf-inspector/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Fast Rust library for PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Includes bindings for [Python](docs/python.md), [Node.js](napi/README.md), and [browser WebAssembly](wasm/README.md).
-
-Built by [Firecrawl](https://firecrawl.dev) to handle text-based PDFs locally in under 200ms, skipping expensive OCR services for the ~54% of PDFs that don't need them.
 
 ## Features
 
@@ -22,27 +17,17 @@ Built by [Firecrawl](https://firecrawl.dev) to handle text-based PDFs locally in
 - **Browser WebAssembly** — Run the same Rust parser locally in browsers and Web Workers, with embedded CMaps and no server round trip.
 - **Lightweight** — Pure Rust, no ML models, no external services. Single dependency on `lopdf` for PDF parsing.
 
-## Benchmark
+## Validation
 
-Evaluated on the [opendataloader-bench](https://github.com/opendataloader-project/opendataloader-bench) corpus (200 PDFs). Only local engines without model-based PDF parsing are shown; OCR was disabled. Scores are 0-1, higher is better.
-
-| Engine | Overall | Reading Order (NID) | Tables (TEDS) | Headings (MHS) | Speed (200 docs) |
-|---|---|---|---|---|---|
-| pdf-inspector | **0.875** | **0.915** | **0.814** | 0.788 | **0.470s** |
-| liteparse | 0.873 | 0.913 | 0.693 | **0.811** | 0.750s |
-| opendataloader | 0.831 | 0.902 | 0.489 | 0.739 | 2.569s |
-| pymupdf4llm | 0.735 | 0.886 | 0.401 | 0.424 | 17.117s |
-| markitdown | 0.589 | 0.844 | 0.273 | 0.000 | 16.165s |
-
-Results were refreshed on July 31, 2026, on an Apple M4 Pro. Engine versions were pdf-inspector 0.2.6, LiteParse 2.10.1, OpenDataLoader 2.2.1, PyMuPDF4LLM 0.2.0, and MarkItDown 0.1.5. Speed is the median of five alternating or rotating complete corpus runs after an excluded warm-up run, with each parser processing documents sequentially in a single process.
-
-The complete parser configuration, per-document predictions, evaluator output, and generated charts are available in the [reproducible results branch](https://github.com/firecrawl/opendataloader-bench/tree/abi/pdf-parser-benchmark-results).
-
-**Best fit:** Native-text PDFs where speed, reading order, and table structure matter. In this comparison, pdf-inspector delivered the higher overall, reading-order, and table scores, along with the fastest complete run. That makes it a strong local default for reports, research papers, financial documents, invoices, and legal PDFs that need clean, structured Markdown without adding OCR latency or infrastructure.
-
-Use the [paired benchmark harness](docs/benchmarking.md) to compare two local builds against the exact same corpus and evaluator revision.
+Use your own PDF corpus to validate extraction quality and compare local builds.
+The [benchmarking guide](docs/benchmarking.md) describes the reproducible
+baseline-versus-candidate workflow.
 
 ## Quick start
+
+All public APIs use **1-indexed PDF page numbers**: the first page is `1`.
+Passing page `0` returns an explicit error. Internal Rust collection indices
+and structured-table row/column indices remain 0-indexed.
 
 ### Python
 
@@ -64,12 +49,14 @@ print(result.markdown)   # Markdown string or None
 ### Node.js
 
 ```bash
-npm install @firecrawl/pdf-inspector
+cd napi
+npm install
+npm run build
 ```
 
 ```javascript
 import { readFileSync } from 'fs';
-import { processPdf, classifyPdf } from '@firecrawl/pdf-inspector';
+import { processPdf, classifyPdf } from './napi/index.js';
 
 const result = processPdf(readFileSync('document.pdf'));
 console.log(result.pdfType);   // "TextBased", "Scanned", "ImageBased", "Mixed"
@@ -81,11 +68,11 @@ console.log(result.markdown);  // Markdown string or null
 ### Browser WebAssembly
 
 ```bash
-npm install @firecrawl/pdf-inspector-wasm
+wasm-pack build wasm --target web --out-dir pkg --release
 ```
 
 ```javascript
-import init, { processPdf } from '@firecrawl/pdf-inspector-wasm';
+import init, { processPdf } from './wasm/pkg/pdf_inspector_wasm.js';
 
 await init();
 const response = await fetch('/document.pdf');
@@ -100,17 +87,17 @@ console.log(result.markdown);
 
 ### Rust
 
-Install from [crates.io](https://crates.io/crates/pdf-inspector):
+Install directly from this repository:
 
 ```bash
-cargo add pdf-inspector
+cargo install --git https://github.com/jesko2004/pdf-inspector.git
 ```
 
 Or add it manually:
 
 ```toml
 [dependencies]
-pdf-inspector = "0.1"
+pdf-inspector = { git = "https://github.com/jesko2004/pdf-inspector.git" }
 ```
 
 ```rust
@@ -129,7 +116,7 @@ if let Some(markdown) = &result.markdown {
 
 ```bash
 # Install the CLI tools
-cargo install pdf-inspector
+cargo install --git https://github.com/jesko2004/pdf-inspector.git
 
 # Convert PDF to Markdown
 pdf2md document.pdf

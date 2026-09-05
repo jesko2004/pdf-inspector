@@ -54,7 +54,7 @@ export interface PdfProcessResult {
 export interface PdfClassification {
   pdfType: PdfType;
   pageCount: number;
-  /** 0-indexed page numbers, matching the native Node.js API. */
+  /** 1-indexed page numbers, matching every public pdf-inspector API. */
   pagesNeedingOcr: number[];
   confidence: number;
 }

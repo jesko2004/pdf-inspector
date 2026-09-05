@@ -5,7 +5,7 @@ use pdf_inspector::extractor::group_into_lines;
 use pdf_inspector::types::ItemType;
 use pdf_inspector::types::TextLine;
 use pdf_inspector::{
-    detect_pdf_type, detect_vector_grid_in_region_mem, extract_pages_markdown,
+    classify_pdf_mem, detect_pdf_type, detect_vector_grid_in_region_mem, extract_pages_markdown,
     extract_pages_markdown_mem, extract_tables_in_regions_mem, extract_text,
     extract_text_in_regions_mem, extract_text_with_positions, extract_text_with_positions_mem,
     process_pdf_mem, process_pdf_with_options, to_markdown, MarkdownOptions, PdfError, PdfOptions,
@@ -1302,7 +1302,7 @@ fn test_rotated_table_layout_correction() {
 /// Build full-page region args for `page_count` pages.
 /// Uses a generously large bbox (1200x1200) to capture any page size.
 fn full_page_regions(page_count: u32) -> Vec<(u32, Vec<[f32; 4]>)> {
-    (0..page_count)
+    (1..=page_count)
         .map(|p| (p, vec![[0.0, 0.0, 1200.0, 1200.0]]))
         .collect()
 }
@@ -1347,14 +1347,14 @@ fn test_extract_regions_mem_basic_text_pdf() {
     // First page should have non-empty text
     let first = &regions[0].regions[0];
     assert!(!first.text.trim().is_empty(), "First page should have text");
-    assert_eq!(regions[0].page, 0);
+    assert_eq!(regions[0].page, 1);
 }
 
 #[test]
 fn test_extract_regions_mem_identity_h_needs_ocr() {
     let buf = std::fs::read("tests/fixtures/shinagawa_identity_h.pdf").unwrap();
     let regions =
-        extract_text_in_regions_mem(&buf, &[(0, vec![[0.0, 0.0, 1200.0, 1200.0]])]).unwrap();
+        extract_text_in_regions_mem(&buf, &[(1, vec![[0.0, 0.0, 1200.0, 1200.0]])]).unwrap();
     assert_eq!(regions.len(), 1);
     assert!(
         regions[0].regions[0].needs_ocr,
@@ -1394,7 +1394,7 @@ fn test_extract_regions_mem_multiple_regions_per_page() {
     let regions = extract_text_in_regions_mem(
         &buf,
         &[(
-            0,
+            1,
             vec![
                 [0.0, 0.0, 300.0, 100.0],   // small top-left
                 [0.0, 0.0, 1200.0, 1200.0], // full page
@@ -1429,7 +1429,7 @@ fn test_extract_regions_mem_nonexistent_page() {
 #[test]
 fn test_extract_regions_mem_empty_region() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
-    let regions = extract_text_in_regions_mem(&buf, &[(0, vec![[0.0, 0.0, 0.0, 0.0]])]).unwrap();
+    let regions = extract_text_in_regions_mem(&buf, &[(1, vec![[0.0, 0.0, 0.0, 0.0]])]).unwrap();
     assert_eq!(regions.len(), 1);
     assert!(
         regions[0].regions[0].needs_ocr,
@@ -1439,7 +1439,7 @@ fn test_extract_regions_mem_empty_region() {
 
 #[test]
 fn test_extract_regions_mem_not_a_pdf() {
-    let result = extract_text_in_regions_mem(b"not a pdf", &[(0, vec![[0.0, 0.0, 100.0, 100.0]])]);
+    let result = extract_text_in_regions_mem(b"not a pdf", &[(1, vec![[0.0, 0.0, 100.0, 100.0]])]);
     assert!(result.is_err(), "Non-PDF input should return an error");
 }
 
@@ -1447,7 +1447,7 @@ fn test_extract_regions_mem_not_a_pdf() {
 fn test_extract_regions_mem_rotated_page_not_false_empty() {
     let buf = std::fs::read("tests/fixtures/tnagriculture_06_12.pdf").unwrap();
     let regions =
-        extract_text_in_regions_mem(&buf, &[(0, vec![[0.0, 0.0, 1200.0, 1200.0]])]).unwrap();
+        extract_text_in_regions_mem(&buf, &[(1, vec![[0.0, 0.0, 1200.0, 1200.0]])]).unwrap();
     assert_eq!(regions.len(), 1);
     assert_eq!(regions[0].regions.len(), 1);
     let region = &regions[0].regions[0];
@@ -1565,7 +1565,7 @@ fn test_extract_tables_in_regions_table_pdf() {
     // tnagriculture has a clear table with district names and spice columns
     let buf = std::fs::read("tests/fixtures/tnagriculture_06_12.pdf").unwrap();
     let results =
-        extract_tables_in_regions_mem(&buf, &[(0, vec![[0.0, 0.0, 1200.0, 1200.0]])]).unwrap();
+        extract_tables_in_regions_mem(&buf, &[(1, vec![[0.0, 0.0, 1200.0, 1200.0]])]).unwrap();
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].regions.len(), 1);
@@ -1590,7 +1590,7 @@ fn test_extract_tables_in_regions_non_table_region() {
     // Use a small region that likely won't contain enough items for a table
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let results =
-        extract_tables_in_regions_mem(&buf, &[(0, vec![[0.0, 0.0, 50.0, 50.0]])]).unwrap();
+        extract_tables_in_regions_mem(&buf, &[(1, vec![[0.0, 0.0, 50.0, 50.0]])]).unwrap();
 
     assert_eq!(results.len(), 1);
     assert_eq!(results[0].regions.len(), 1);
@@ -1610,7 +1610,7 @@ fn test_extract_tables_in_regions_non_table_region() {
 #[test]
 fn test_extract_tables_in_regions_empty_region() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
-    let results = extract_tables_in_regions_mem(&buf, &[(0, vec![[0.0, 0.0, 0.0, 0.0]])]).unwrap();
+    let results = extract_tables_in_regions_mem(&buf, &[(1, vec![[0.0, 0.0, 0.0, 0.0]])]).unwrap();
 
     assert_eq!(results.len(), 1);
     let region = &results[0].regions[0];
@@ -1622,7 +1622,7 @@ fn test_extract_tables_in_regions_empty_region() {
 fn test_extract_tables_in_regions_identity_h_needs_ocr() {
     let buf = std::fs::read("tests/fixtures/shinagawa_identity_h.pdf").unwrap();
     let results =
-        extract_tables_in_regions_mem(&buf, &[(0, vec![[0.0, 0.0, 1200.0, 1200.0]])]).unwrap();
+        extract_tables_in_regions_mem(&buf, &[(1, vec![[0.0, 0.0, 1200.0, 1200.0]])]).unwrap();
 
     assert_eq!(results.len(), 1);
     let region = &results[0].regions[0];
@@ -1632,7 +1632,7 @@ fn test_extract_tables_in_regions_identity_h_needs_ocr() {
 #[test]
 fn test_extract_tables_in_regions_not_a_pdf() {
     let result =
-        extract_tables_in_regions_mem(b"not a pdf", &[(0, vec![[0.0, 0.0, 100.0, 100.0]])]);
+        extract_tables_in_regions_mem(b"not a pdf", &[(1, vec![[0.0, 0.0, 100.0, 100.0]])]);
     assert!(result.is_err());
 }
 
@@ -1650,7 +1650,7 @@ fn test_extract_tables_in_regions_nonexistent_page() {
 
 #[test]
 fn test_bits_pilani_page4_table_detection() {
-    // Page 4 (0-indexed 3) has a table with multi-line wrapped headers and
+    // Page 4 has a table with multi-line wrapped headers and
     // numeric data columns. The heuristic detector previously failed because:
     // 1. Header items at different X positions than data created extra column
     //    clusters (6 cols instead of 4)
@@ -1658,7 +1658,7 @@ fn test_bits_pilani_page4_table_detection() {
     //    duplicate header cells that looks_like_partial_table_ex rejected
     let buf = std::fs::read("tests/fixtures/bits_pilani_feedback.pdf").unwrap();
     let results =
-        extract_tables_in_regions_mem(&buf, &[(3, vec![[0.0, 0.0, 612.0, 792.0]])]).unwrap();
+        extract_tables_in_regions_mem(&buf, &[(4, vec![[0.0, 0.0, 612.0, 792.0]])]).unwrap();
     assert_eq!(results.len(), 1);
     let region = &results[0].regions[0];
     assert!(
@@ -1674,11 +1674,11 @@ fn test_bits_pilani_page4_table_detection() {
 
 #[test]
 fn test_bits_pilani_page8_table_detection() {
-    // Page 8 (0-indexed 7) has a numbered-row table that already worked.
+    // Page 8 has a numbered-row table that already worked.
     // Verify it still works after changes.
     let buf = std::fs::read("tests/fixtures/bits_pilani_feedback.pdf").unwrap();
     let results =
-        extract_tables_in_regions_mem(&buf, &[(7, vec![[0.0, 0.0, 612.0, 792.0]])]).unwrap();
+        extract_tables_in_regions_mem(&buf, &[(8, vec![[0.0, 0.0, 612.0, 792.0]])]).unwrap();
     assert_eq!(results.len(), 1);
     let region = &results[0].regions[0];
     assert!(!region.needs_ocr, "Page 8 table should still be detected");
@@ -1692,7 +1692,7 @@ fn test_extract_tables_in_regions_uses_line_grid() {
     // markdown still contains all four data cells.
     let buf = synthetic_vector_grid_pdf(false);
     let results =
-        extract_tables_in_regions_mem(&buf, &[(0, vec![[40.0, 50.0, 220.0, 760.0]])]).unwrap();
+        extract_tables_in_regions_mem(&buf, &[(1, vec![[40.0, 50.0, 220.0, 760.0]])]).unwrap();
     let region = &results[0].regions[0];
     assert!(
         !region.needs_ocr,
@@ -2004,7 +2004,7 @@ fn test_detect_vector_grid_in_region_line_pdf() {
 
     let buf = synthetic_vector_grid_pdf(false);
     let crop = [50.0_f32, 60.0, 210.0, 130.0];
-    let detected = detect_vector_grid_in_region_mem(&buf, 0, crop, 72.0)
+    let detected = detect_vector_grid_in_region_mem(&buf, 1, crop, 72.0)
         .unwrap()
         .expect("ruled vector table should be detected");
 
@@ -2029,7 +2029,7 @@ fn test_detect_vector_grid_in_region_line_pdf() {
     let markdown = extract_tables_with_structure_mem(
         &buf,
         &[TsrTableInput {
-            page: 0,
+            page: 1,
             crop_pdf_pt_bbox: crop,
             render_dpi: 72.0,
             structure_tokens: detected.structure_tokens,
@@ -2049,7 +2049,7 @@ fn test_detect_vector_grid_in_region_line_pdf() {
 fn test_detect_vector_grid_in_region_text_pdf_returns_none() {
     let buf = make_minimal_text_pdf();
     let detected =
-        detect_vector_grid_in_region_mem(&buf, 0, [0.0, 0.0, 300.0, 800.0], 72.0).unwrap();
+        detect_vector_grid_in_region_mem(&buf, 1, [0.0, 0.0, 300.0, 800.0], 72.0).unwrap();
     assert!(detected.is_none());
 }
 
@@ -2059,7 +2059,7 @@ fn test_detect_vector_grid_in_region_filters_to_requested_table() {
 
     let buf = synthetic_vector_grid_pdf(true);
     let second_table_crop = [50.0_f32, 240.0, 210.0, 310.0];
-    let detected = detect_vector_grid_in_region_mem(&buf, 0, second_table_crop, 72.0)
+    let detected = detect_vector_grid_in_region_mem(&buf, 1, second_table_crop, 72.0)
         .unwrap()
         .expect("second ruled table should be detected");
 
@@ -2067,7 +2067,7 @@ fn test_detect_vector_grid_in_region_filters_to_requested_table() {
     let markdown = extract_tables_with_structure_mem(
         &buf,
         &[TsrTableInput {
-            page: 0,
+            page: 1,
             crop_pdf_pt_bbox: second_table_crop,
             render_dpi: 72.0,
             structure_tokens: detected.structure_tokens,
@@ -2086,7 +2086,7 @@ fn test_detect_vector_grid_in_region_filters_to_requested_table() {
 #[test]
 fn test_extract_tables_with_structure_real_pdf_bits_pilani() {
     use pdf_inspector::{extract_tables_with_structure_mem, TsrTableInput};
-    // Hand-crafted TSR fixture targeting page 4 (0-indexed=3) of
+    // Hand-crafted TSR fixture targeting page 4 of
     // bits_pilani_feedback.pdf, which contains a clean tabular layout.
     //
     // We construct a 2×2 table:
@@ -2144,7 +2144,7 @@ fn test_extract_tables_with_structure_real_pdf_bits_pilani() {
     .collect();
 
     let inputs = vec![TsrTableInput {
-        page: 3,
+        page: 4,
         crop_pdf_pt_bbox: crop,
         render_dpi: dpi,
         structure_tokens: tokens,
@@ -2206,7 +2206,7 @@ fn test_extract_tables_with_structure_dense_overlapping_slanet_boxes() {
     let mds = extract_tables_with_structure_mem(
         &buf,
         &[TsrTableInput {
-            page: 0,
+            page: 1,
             crop_pdf_pt_bbox: [0.0, 0.0, 200.0, 800.0],
             render_dpi: 72.0,
             structure_tokens: tokens,
@@ -2229,7 +2229,7 @@ fn test_extract_tables_with_structure_input_order_preserved() {
     // Two inputs; both target the same page but with different shapes.
     // We just need to confirm we get 2 outputs in the same order.
     let make_input = |toks: Vec<&str>, cells: Vec<Vec<f32>>| TsrTableInput {
-        page: 3,
+        page: 4,
         crop_pdf_pt_bbox: [80.0, 170.0, 280.0, 240.0],
         render_dpi: 72.0,
         structure_tokens: toks.into_iter().map(String::from).collect(),
@@ -2341,7 +2341,7 @@ fn test_extract_tables_with_structure_cells_real_pdf_bits_pilani() {
     .collect();
 
     let inputs = vec![TsrTableInput {
-        page: 3,
+        page: 4,
         crop_pdf_pt_bbox: crop,
         render_dpi: dpi,
         structure_tokens: tokens,
@@ -2419,7 +2419,7 @@ fn test_extract_tables_with_structure_separator_after_thead() {
     let mds = extract_tables_with_structure_mem(
         &buf,
         &[TsrTableInput {
-            page: 3,
+            page: 4,
             crop_pdf_pt_bbox: crop,
             render_dpi: dpi,
             structure_tokens: tokens,
@@ -2478,7 +2478,7 @@ fn test_auto_passes_through_clean_tsr_output() {
     let results = extract_tables_with_structure_auto_mem(
         &buf,
         &[TsrTableInput {
-            page: 0,
+            page: 1,
             crop_pdf_pt_bbox: [0.0, 0.0, 200.0, 800.0],
             render_dpi: 72.0,
             structure_tokens: tokens,
@@ -2538,7 +2538,7 @@ fn test_auto_expands_multi_row_in_cell() {
     let results = extract_tables_with_structure_auto_mem(
         &buf,
         &[TsrTableInput {
-            page: 0,
+            page: 1,
             crop_pdf_pt_bbox: [0.0, 0.0, 200.0, 800.0],
             render_dpi: 72.0,
             structure_tokens: tokens,
@@ -2600,7 +2600,7 @@ fn test_auto_expands_under_counted_vector_grid_rows() {
     let results = extract_tables_with_structure_auto_mem(
         &buf,
         &[TsrTableInput {
-            page: 0,
+            page: 1,
             crop_pdf_pt_bbox: crop,
             render_dpi: 72.0,
             structure_tokens: tokens,
@@ -2630,7 +2630,7 @@ fn test_auto_keeps_wrapped_header_vector_grid_doc51() {
 
     let buf = std::fs::read("tests/fixtures/government_positions_women.pdf").unwrap();
     let crop = [0.0, 0.0, 612.0, 792.0];
-    let grid = detect_vector_grid_in_region_mem(&buf, 0, crop, 200.0)
+    let grid = detect_vector_grid_in_region_mem(&buf, 1, crop, 200.0)
         .unwrap()
         .expect("expected doc 51 vector grid");
     assert_eq!(
@@ -2642,7 +2642,7 @@ fn test_auto_keeps_wrapped_header_vector_grid_doc51() {
     let results = extract_tables_with_structure_auto_mem(
         &buf,
         &[TsrTableInput {
-            page: 0,
+            page: 1,
             crop_pdf_pt_bbox: crop,
             render_dpi: 200.0,
             structure_tokens: grid.structure_tokens,
@@ -2736,7 +2736,7 @@ fn test_auto_does_not_fire_on_legit_rowspan_cell() {
     let results = extract_tables_with_structure_auto_mem(
         &buf,
         &[TsrTableInput {
-            page: 0,
+            page: 1,
             crop_pdf_pt_bbox: [0.0, 0.0, 200.0, 800.0],
             render_dpi: 72.0,
             structure_tokens: tokens,
@@ -2793,7 +2793,7 @@ fn test_auto_expands_when_heuristic_region_is_empty() {
     let results = extract_tables_with_structure_auto_mem(
         &buf,
         &[TsrTableInput {
-            page: 0,
+            page: 1,
             // Crop is at the BOTTOM of the page where there's no text.
             crop_pdf_pt_bbox: [0.0, 0.0, 200.0, 50.0],
             render_dpi: 72.0,
@@ -2852,7 +2852,7 @@ fn test_auto_isolates_per_input_failures() {
     .collect();
     // A clean input that should pass through with no fallback.
     let good_input = TsrTableInput {
-        page: 0,
+        page: 1,
         crop_pdf_pt_bbox: [0.0, 0.0, 200.0, 800.0],
         render_dpi: 72.0,
         structure_tokens: good_tokens,
@@ -2905,11 +2905,11 @@ fn test_auto_isolates_per_input_failures() {
 #[test]
 fn test_extract_pages_markdown_basic() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
-    let result = extract_pages_markdown_mem(&buf, Some(&[0, 1])).unwrap();
+    let result = extract_pages_markdown_mem(&buf, Some(&[1, 2])).unwrap();
 
     assert_eq!(result.pages.len(), 2);
-    assert_eq!(result.pages[0].page, 0);
-    assert_eq!(result.pages[1].page, 1);
+    assert_eq!(result.pages[0].page, 1);
+    assert_eq!(result.pages[1].page, 2);
     // Text-based PDF should produce non-empty markdown
     assert!(!result.pages[0].markdown.is_empty());
     assert!(!result.pages[0].needs_ocr);
@@ -2919,12 +2919,12 @@ fn test_extract_pages_markdown_basic() {
 fn test_extract_pages_markdown_page_ordering() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     // Request pages in non-sequential order
-    let result = extract_pages_markdown_mem(&buf, Some(&[1, 0])).unwrap();
+    let result = extract_pages_markdown_mem(&buf, Some(&[2, 1])).unwrap();
 
     assert_eq!(result.pages.len(), 2);
     // Results should match input order, not document order
-    assert_eq!(result.pages[0].page, 1);
-    assert_eq!(result.pages[1].page, 0);
+    assert_eq!(result.pages[0].page, 2);
+    assert_eq!(result.pages[1].page, 1);
 }
 
 #[test]
@@ -2936,7 +2936,7 @@ fn test_extract_pages_markdown_out_of_range() {
     assert_eq!(result.pages[0].page, 9999);
     assert!(result.pages[0].markdown.is_empty());
     assert!(result.pages[0].needs_ocr);
-    assert!(result.pages_needing_ocr.contains(&10000)); // 1-indexed
+    assert!(result.pages_needing_ocr.contains(&9999));
 }
 
 #[test]
@@ -2949,10 +2949,10 @@ fn test_extract_pages_markdown_empty_pages_list() {
 #[test]
 fn test_extract_pages_markdown_single_page() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
-    let result = extract_pages_markdown_mem(&buf, Some(&[0])).unwrap();
+    let result = extract_pages_markdown_mem(&buf, Some(&[1])).unwrap();
 
     assert_eq!(result.pages.len(), 1);
-    assert_eq!(result.pages[0].page, 0);
+    assert_eq!(result.pages[0].page, 1);
     assert!(!result.pages[0].markdown.is_empty());
     assert!(!result.pages[0].needs_ocr);
 }
@@ -2964,10 +2964,61 @@ fn test_extract_pages_markdown_invalid_buffer() {
 }
 
 #[test]
+fn test_public_page_apis_reject_page_zero() {
+    let buf = make_minimal_text_pdf();
+    let region = vec![[0.0, 0.0, 300.0, 800.0]];
+    let page_filter = HashSet::from([0]);
+
+    assert!(matches!(
+        pdf_inspector::process_pdf_mem_with_options(&buf, PdfOptions::new().pages([0])),
+        Err(PdfError::InvalidPageNumber(0))
+    ));
+    assert!(matches!(
+        pdf_inspector::detect_pdf_type_mem_with_config(
+            &buf,
+            DetectionConfig {
+                strategy: ScanStrategy::Pages(vec![0]),
+                ..DetectionConfig::default()
+            }
+        ),
+        Err(PdfError::InvalidPageNumber(0))
+    ));
+    assert!(matches!(
+        pdf_inspector::extractor::extract_text_with_positions_mem_pages(&buf, Some(&page_filter)),
+        Err(PdfError::InvalidPageNumber(0))
+    ));
+
+    assert!(matches!(
+        extract_pages_markdown_mem(&buf, Some(&[0])),
+        Err(PdfError::InvalidPageNumber(0))
+    ));
+    assert!(matches!(
+        extract_text_in_regions_mem(&buf, &[(0, region.clone())]),
+        Err(PdfError::InvalidPageNumber(0))
+    ));
+    assert!(matches!(
+        extract_tables_in_regions_mem(&buf, &[(0, region)]),
+        Err(PdfError::InvalidPageNumber(0))
+    ));
+    assert!(matches!(
+        detect_vector_grid_in_region_mem(&buf, 0, [0.0, 0.0, 300.0, 800.0], 72.0),
+        Err(PdfError::InvalidPageNumber(0))
+    ));
+}
+
+#[test]
+fn test_lightweight_classification_uses_one_indexed_ocr_pages() {
+    let buf = std::fs::read("tests/fixtures/shinagawa_identity_h.pdf").unwrap();
+    let result = classify_pdf_mem(&buf).unwrap();
+
+    assert_eq!(result.pages_needing_ocr, vec![1]);
+}
+
+#[test]
 fn test_extract_pages_markdown_gid_pages_need_ocr() {
     // shinagawa_identity_h.pdf has GID-encoded fonts
     let buf = std::fs::read("tests/fixtures/shinagawa_identity_h.pdf").unwrap();
-    let result = extract_pages_markdown_mem(&buf, Some(&[0])).unwrap();
+    let result = extract_pages_markdown_mem(&buf, Some(&[1])).unwrap();
 
     assert_eq!(result.pages.len(), 1);
     assert!(result.pages[0].needs_ocr);
@@ -2979,7 +3030,7 @@ fn test_extract_pages_markdown_classification_with_tables() {
     // nexo-price-en.pdf is known to have tables
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let page_count = process_pdf_mem(&buf).unwrap().page_count;
-    let page_indices: Vec<u32> = (0..page_count).collect();
+    let page_indices: Vec<u32> = (1..=page_count).collect();
     let result = extract_pages_markdown_mem(&buf, Some(&page_indices)).unwrap();
 
     assert!(
@@ -2993,7 +3044,7 @@ fn test_extract_pages_markdown_classification_with_tables() {
 fn test_extract_pages_markdown_simple_pdf_no_complexity() {
     // bare_name_struct.pdf is a simple document with a heading and code block
     let buf = std::fs::read("tests/fixtures/bare_name_struct.pdf").unwrap();
-    let result = extract_pages_markdown_mem(&buf, Some(&[0])).unwrap();
+    let result = extract_pages_markdown_mem(&buf, Some(&[1])).unwrap();
 
     assert!(result.pages_with_tables.is_empty());
     assert!(result.pages_with_columns.is_empty());
@@ -3005,7 +3056,7 @@ fn test_extract_pages_markdown_classification_matches_process_pdf() {
     let buf = std::fs::read("tests/fixtures/nexo-price-en.pdf").unwrap();
     let full = process_pdf_mem(&buf).unwrap();
     let page_count = full.page_count;
-    let page_indices: Vec<u32> = (0..page_count).collect();
+    let page_indices: Vec<u32> = (1..=page_count).collect();
     let result = extract_pages_markdown_mem(&buf, Some(&page_indices)).unwrap();
 
     assert_eq!(
@@ -3028,7 +3079,7 @@ fn test_extract_pages_markdown_consistency_with_process_pdf() {
 
     // Get per-page output for all pages
     let page_count = full.page_count;
-    let page_indices: Vec<u32> = (0..page_count).collect();
+    let page_indices: Vec<u32> = (1..=page_count).collect();
     let result = extract_pages_markdown_mem(&buf, Some(&page_indices)).unwrap();
 
     // Concatenated per-page markdown should contain substantial overlap with
@@ -3064,7 +3115,7 @@ fn test_extract_pages_markdown_none_returns_all_pages() {
 
     assert_eq!(result.pages.len() as u32, page_count);
     for (i, page) in result.pages.iter().enumerate() {
-        assert_eq!(page.page, i as u32, "pages should be in document order");
+        assert_eq!(page.page, i as u32 + 1, "pages should be in document order");
     }
 }
 
@@ -3073,8 +3124,8 @@ fn test_extract_pages_markdown_path_api() {
     let path = "tests/fixtures/nexo-price-en.pdf";
     let buf = std::fs::read(path).unwrap();
 
-    let via_path = extract_pages_markdown(path, Some(&[0])).unwrap();
-    let via_mem = extract_pages_markdown_mem(&buf, Some(&[0])).unwrap();
+    let via_path = extract_pages_markdown(path, Some(&[1])).unwrap();
+    let via_mem = extract_pages_markdown_mem(&buf, Some(&[1])).unwrap();
 
     assert_eq!(via_path.pages.len(), via_mem.pages.len());
     assert_eq!(via_path.pages[0].markdown, via_mem.pages[0].markdown);
@@ -3215,7 +3266,7 @@ fn test_extract_tables_with_structure_distributes_wide_item_across_cells() {
     let cells_lists = extract_tables_with_structure_cells_mem(
         &buf,
         &[TsrTableInput {
-            page: 0,
+            page: 1,
             crop_pdf_pt_bbox: [0.0, 0.0, 200.0, 800.0],
             render_dpi: 72.0,
             structure_tokens: tokens,

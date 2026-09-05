@@ -1,8 +1,6 @@
 # pdf-inspector
 
-Fast PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Python bindings via [PyO3](https://pyo3.rs) for the [pdf-inspector](https://github.com/firecrawl/pdf-inspector) Rust library.
-
-Built by [Firecrawl](https://firecrawl.dev) to handle text-based PDFs locally in under 200ms, skipping expensive OCR services for the ~54% of PDFs that don't need them.
+Fast PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Python bindings via [PyO3](https://pyo3.rs) for the [pdf-inspector](https://github.com/jesko2004/pdf-inspector) Rust library.
 
 ## Features
 
@@ -12,29 +10,11 @@ Built by [Firecrawl](https://firecrawl.dev) to handle text-based PDFs locally in
 - **Robust text decoding** — CID/Type0 fonts via ToUnicode CMaps, plus automatic flagging of broken encodings so callers can fall back to OCR.
 - **Lightweight** — native Rust core, no ML models, no external services; ships type stubs.
 
-## Benchmark
-
-[opendataloader-bench](https://github.com/opendataloader-project/opendataloader-bench) corpus (200 PDFs), local engines without model-based PDF parsing; OCR disabled. Scores 0–1, higher is better:
-
-| Engine | Overall | Reading order | Tables (TEDS) | Headings | Speed |
-|---|---|---|---|---|---|
-| **pdf-inspector** | **0.875** | **0.915** | **0.814** | 0.788 | **0.470s** |
-| liteparse | 0.873 | 0.913 | 0.693 | **0.811** | 0.750s |
-| opendataloader | 0.831 | 0.902 | 0.489 | 0.739 | 2.569s |
-| pymupdf4llm | 0.735 | 0.886 | 0.401 | 0.424 | 17.117s |
-| markitdown | 0.589 | 0.844 | 0.273 | 0.000 | 16.165s |
-
-Refreshed July 31, 2026, on Apple M4 Pro; speed is the median of five complete corpus runs after an excluded warm-up. Full methodology and versions are in the [repo README](https://github.com/firecrawl/pdf-inspector#benchmark), with raw timings and artifacts in the [results branch](https://github.com/firecrawl/opendataloader-bench/tree/abi/pdf-parser-benchmark-results).
-
 ## Install
 
 ```bash
-pip install pdf-inspector
-```
-
-Prebuilt wheels cover CPython ≥3.8 on Linux (x86_64, aarch64), macOS (Intel, Apple Silicon), and Windows (x64). Other platforms build from source, which requires a Rust toolchain. For local development in a repo checkout:
-
-```bash
+git clone https://github.com/jesko2004/pdf-inspector.git
+cd pdf-inspector
 pip install maturin
 maturin develop --release
 ```
@@ -78,9 +58,12 @@ result = pdf_inspector.extract_pages_markdown("document.pdf")
 for page in result.pages:
     print(f"Page {page.page}: {len(page.markdown)} chars, needs_ocr={page.needs_ocr}")
 
-# Restrict to specific 0-indexed pages (preserves caller order)
-result = pdf_inspector.extract_pages_markdown("document.pdf", pages=[0, 2])
+# Restrict to specific 1-indexed pages (preserves caller order)
+result = pdf_inspector.extract_pages_markdown("document.pdf", pages=[1, 3])
 ```
+
+All public page inputs and result fields are 1-indexed. Passing page `0`
+raises `ValueError`.
 
 ## API reference
 
@@ -122,7 +105,7 @@ class PdfResult:                     # process_pdf / detect_pdf
 class PdfClassification:             # classify_pdf
     pdf_type: str
     page_count: int
-    pages_needing_ocr: list[int]     # 0-indexed
+    pages_needing_ocr: list[int]     # 1-indexed
     confidence: float
 
 class TextItem:                      # extract_text_with_positions
@@ -141,11 +124,11 @@ class TextItem:                      # extract_text_with_positions
     item_type: str
 
 class PageRegionTexts:               # extract_text_in_regions
-    page: int                        # 0-indexed
+    page: int                        # 1-indexed
     regions: list[RegionText]        # RegionText: text: str, needs_ocr: bool
 
 class PagesExtractionResult:         # extract_pages_markdown
-    pages: list[PageMarkdown]        # PageMarkdown: page (0-indexed), markdown, needs_ocr
+    pages: list[PageMarkdown]        # PageMarkdown: page (1-indexed), markdown, needs_ocr
     pages_with_tables: list[int]     # 1-indexed
     pages_with_columns: list[int]    # 1-indexed
     pages_needing_ocr: list[int]     # 1-indexed

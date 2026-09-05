@@ -10,13 +10,13 @@ const pdf = readFileSync(pdfPath);
 const dpi = Number(process.argv[3] ?? 200);
 
 const crops = [
-  { pageIdx: 29, box: [0, 0, 612, 792], label: "page30-full" },
-  { pageIdx: 16, box: [0, 0, 612, 792], label: "page17-full" },
-  { pageIdx: 23, box: [0, 0, 612, 792], label: "page24-full" },
+  { pageNumber: 30, box: [0, 0, 612, 792], label: "page30-full" },
+  { pageNumber: 17, box: [0, 0, 612, 792], label: "page17-full" },
+  { pageNumber: 24, box: [0, 0, 612, 792], label: "page24-full" },
 ];
 
-for (const { pageIdx, box, label } of crops) {
-  const result = detectVectorGridInRegion(pdf, pageIdx, box, dpi);
+for (const { pageNumber, box, label } of crops) {
+  const result = detectVectorGridInRegion(pdf, pageNumber, box, dpi);
   if (!result) {
     console.log(`${label}: null`);
     continue;

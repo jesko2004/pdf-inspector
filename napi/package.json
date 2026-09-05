@@ -1,5 +1,6 @@
 {
-  "name": "@firecrawl/pdf-inspector",
+  "name": "pdf-inspector-local",
+  "private": true,
   "version": "1.11.2",
   "description": "Fast PDF classification and text extraction. Detect text-based vs scanned PDFs, extract text by region with quality checks. Native Rust performance via napi-rs.",
   "main": "index.js",
@@ -16,8 +17,7 @@
     "ocr",
     "pdf-classification",
     "napi",
-    "rust",
-    "firecrawl"
+    "rust"
   ],
   "files": [
     "index.js",
@@ -27,12 +27,9 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/firecrawl/pdf-inspector"
+    "url": "https://github.com/jesko2004/pdf-inspector"
   },
-  "homepage": "https://github.com/firecrawl/pdf-inspector",
-  "publishConfig": {
-    "access": "public"
-  },
+  "homepage": "https://github.com/jesko2004/pdf-inspector",
   "napi": {
     "binaryName": "pdf-inspector",
     "targets": [
@@ -47,10 +44,5 @@
   },
   "devDependencies": {
     "@napi-rs/cli": "^3.4.1"
-  },
-  "optionalDependencies": {
-    "@firecrawl/pdf-inspector-linux-x64-gnu": "1.11.2",
-    "@firecrawl/pdf-inspector-darwin-arm64": "1.11.2",
-    "@firecrawl/pdf-inspector-win32-x64-msvc": "1.11.2"
   }
 }

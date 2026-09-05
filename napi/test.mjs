@@ -82,10 +82,10 @@ console.log('  extractTextWithPositions with pages: OK');
 // --- extractTextInRegions ---
 console.log('Testing extractTextInRegions...');
 const regionResults = extractTextInRegions(fixture, [
-  { page: 0, regions: [[0, 0, 600, 100]] },
+  { page: 1, regions: [[0, 0, 600, 100]] },
 ]);
 assert.equal(regionResults.length, 1);
-assert.equal(regionResults[0].page, 0);
+assert.equal(regionResults[0].page, 1);
 assert.equal(regionResults[0].regions.length, 1);
 assert.equal(typeof regionResults[0].regions[0].text, 'string');
 assert.equal(typeof regionResults[0].regions[0].needsOcr, 'boolean');
@@ -93,7 +93,7 @@ console.log('  extractTextInRegions: OK');
 
 // --- detectVectorGridInRegion ---
 console.log('Testing detectVectorGridInRegion...');
-const vectorGrid = detectVectorGridInRegion(fixture, 0, [0, 0, 600, 800], 72);
+const vectorGrid = detectVectorGridInRegion(fixture, 1, [0, 0, 600, 800], 72);
 assert.ok(vectorGrid === null || typeof vectorGrid === 'object');
 if (vectorGrid) {
   assert.ok(Array.isArray(vectorGrid.structureTokens));
@@ -108,7 +108,7 @@ console.log('Testing extractPagesMarkdown...');
 // omit pages → every page in document order
 const allPages = extractPagesMarkdown(fixture);
 assert.equal(allPages.pages.length, 3);
-assert.deepEqual(allPages.pages.map(p => p.page), [0, 1, 2]);
+assert.deepEqual(allPages.pages.map(p => p.page), [1, 2, 3]);
 assert.ok(typeof allPages.pages[0].markdown === 'string');
 assert.equal(typeof allPages.pages[0].needsOcr, 'boolean');
 assert.ok(Array.isArray(allPages.pagesWithTables));
@@ -118,16 +118,24 @@ assert.equal(typeof allPages.isComplex, 'boolean');
 console.log('  extractPagesMarkdown (no pages arg): OK');
 
 // selected pages preserve caller order
-const picked = extractPagesMarkdown(fixture, [2, 0]);
+const picked = extractPagesMarkdown(fixture, [3, 1]);
 assert.equal(picked.pages.length, 2);
-assert.equal(picked.pages[0].page, 2);
-assert.equal(picked.pages[1].page, 0);
+assert.equal(picked.pages[0].page, 3);
+assert.equal(picked.pages[1].page, 1);
 console.log('  extractPagesMarkdown with pages: OK');
 
 // --- Error handling ---
 console.log('Testing error handling...');
 assert.throws(() => processPdf(Buffer.from('not a pdf')), /process_pdf/);
 assert.throws(() => classifyPdf(Buffer.from('')), /classify_pdf/);
+assert.throws(
+  () => extractPagesMarkdown(fixture, [0]),
+  /PDF pages are numbered from 1/,
+);
+assert.throws(
+  () => extractTextInRegions(fixture, [{ page: 0, regions: [[0, 0, 10, 10]] }]),
+  /PDF pages are numbered from 1/,
+);
 console.log('  error handling: OK');
 
 console.log('\nAll NAPI tests passed!');
