@@ -526,7 +526,12 @@ fn struct_role_heading_level(role: &StructRole) -> Option<usize> {
 pub(super) fn merge_continuation_tables(
     page_tables: &mut std::collections::HashMap<u32, Vec<PositionedMarkdown>>,
     table_only_pages: &HashSet<u32>,
+    preserve_page_boundaries: bool,
 ) {
+    if preserve_page_boundaries {
+        return;
+    }
+
     let mut sorted_pages: Vec<u32> = page_tables.keys().copied().collect();
     sorted_pages.sort();
 
@@ -831,6 +836,9 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
                 }
                 if p >= line.page {
                     break;
+                }
+                if options.include_page_numbers {
+                    output.push_str(&format!("<!-- Page {} -->\n\n", p));
                 }
                 flush_page_tables_and_images(
                     p,
@@ -1225,6 +1233,9 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
     for &p in &all_content_pages {
         if p <= current_page {
             continue;
+        }
+        if options.include_page_numbers {
+            output.push_str(&format!("\n\n<!-- Page {} -->\n\n", p));
         }
         flush_page_tables_and_images(
             p,
@@ -1654,6 +1665,57 @@ mod tests {
             positions.windows(2).all(|pair| pair[0] < pair[1]),
             "blocks must follow the logical chart-page stream: {md}"
         );
+    }
+
+    #[test]
+    fn page_marker_precedes_intermediate_table_only_page() {
+        let lines = vec![
+            line_at("Page one text.", 1, 700.0),
+            line_at("Page three text.", 3, 700.0),
+        ];
+        let mut tables = HashMap::new();
+        tables.insert(
+            2,
+            vec![PositionedMarkdown::new(
+                700.0,
+                72.0,
+                "| Header |\n|---|\n| Value |\n".into(),
+                None,
+            )],
+        );
+        let options = MarkdownOptions {
+            include_page_numbers: true,
+            ..MarkdownOptions::default()
+        };
+
+        let md = to_markdown_from_lines_with_tables_and_images(
+            lines,
+            options,
+            tables,
+            HashMap::new(),
+            &HashMap::new(),
+            &HashSet::new(),
+            None,
+        );
+
+        let page_1 = md.find("<!-- Page 1 -->").unwrap();
+        let page_2 = md.find("<!-- Page 2 -->").unwrap();
+        let table = md.find("| Header |").unwrap();
+        let page_3 = md.find("<!-- Page 3 -->").unwrap();
+        assert!(page_1 < page_2 && page_2 < table && table < page_3, "{md}");
+    }
+
+    #[test]
+    fn page_markers_preserve_continuation_table_boundaries() {
+        let table =
+            || PositionedMarkdown::new(700.0, 72.0, "| Header |\n|---|\n| Value |\n".into(), None);
+        let mut tables = HashMap::from([(1, vec![table()]), (2, vec![table()])]);
+        let table_only_pages = HashSet::from([1, 2]);
+
+        merge_continuation_tables(&mut tables, &table_only_pages, true);
+
+        assert!(tables.contains_key(&1));
+        assert!(tables.contains_key(&2));
     }
 
     #[test]
