@@ -90,6 +90,12 @@ fn add_leading_tab(mut pdf: Vec<u8>) -> Vec<u8> {
     pdf
 }
 
+fn add_leading_printer_data(pdf: Vec<u8>) -> Vec<u8> {
+    let mut prefixed = b"@PJL ENTER LANGUAGE=PDF\r\nprinter-control-data\r\n".to_vec();
+    prefixed.extend_from_slice(&pdf);
+    prefixed
+}
+
 // Helper to create test TextItems
 fn make_text_item(text: &str, x: f32, y: f32, font_size: f32, page: u32) -> TextItem {
     use pdf_inspector::types::ItemType;
@@ -910,6 +916,29 @@ fn test_bom_prefixed_pdf_header_not_rejected() {
         }
         _ => {} // Parse or InvalidStructure is fine
     }
+}
+
+#[test]
+fn test_process_pdf_mem_repairs_nonzero_pdf_header_offset() {
+    let pdf = add_leading_printer_data(make_minimal_text_pdf());
+
+    let result = process_pdf_mem(&pdf).expect("nonzero PDF header offset should be repaired");
+
+    assert_eq!(result.pdf_type, PdfType::TextBased);
+    assert_eq!(result.page_count, 1);
+    assert!(result
+        .markdown
+        .as_deref()
+        .unwrap_or_default()
+        .contains("Hello World"));
+}
+
+#[test]
+fn test_pdf_header_must_be_within_first_1024_bytes() {
+    let mut prefixed = vec![b'x'; 1024];
+    prefixed.extend_from_slice(&make_minimal_text_pdf());
+
+    assert_not_a_pdf(process_pdf_mem(&prefixed), "plain text");
 }
 
 #[test]
