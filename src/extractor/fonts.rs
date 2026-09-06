@@ -1054,17 +1054,16 @@ pub(crate) fn extract_text_from_operand(
                     if !decoded.is_empty() {
                         return Some(decoded);
                     }
-                } else if !decoded_primary.is_empty() {
-                    if let Some(fb) = entry.fallback.as_ref().map(|c| c.decode_cids(bytes)) {
-                        let expected = bytes.len() / 2;
-                        let decoded_len = decoded_primary.chars().count();
-                        let prefer_fallback = (!fb.is_empty() && decoded_primary.is_empty())
-                            || (!fb.is_empty() && expected > 0 && decoded_len * 2 < expected);
-                        if prefer_fallback || score_text(&fb) > score_text(&decoded_primary) + 3 {
-                            return Some(fb);
+                } else {
+                    if let Some(fallback) = entry.fallback.as_ref() {
+                        let recovered = decode_cids_with_fallback(&entry.primary, fallback, bytes);
+                        if !recovered.is_empty() {
+                            return Some(recovered);
                         }
                     }
-                    return Some(decoded_primary);
+                    if !decoded_primary.is_empty() {
+                        return Some(decoded_primary);
+                    }
                 }
 
                 None
@@ -1227,6 +1226,69 @@ pub(crate) fn extract_text_from_operand(
         let text = remap_texcm_math_symbols(text, base_font_name);
         normalize_cp1252_controls(text, use_cp1252_fallback)
     })
+}
+
+/// Whether an encoding dictionary contains Unicode-style glyph names that our
+/// parser supports but lopdf's encoding parser rejects (for example
+/// `uni0628.i`).
+pub(crate) fn font_encoding_requires_custom_parser(
+    doc: &Document,
+    font_dict: &lopdf::Dictionary,
+) -> bool {
+    let Some(enc_dict) = font_dict
+        .get(b"Encoding")
+        .ok()
+        .and_then(|encoding| resolve_dict(doc, encoding))
+    else {
+        return false;
+    };
+    let Some(differences) = enc_dict
+        .get(b"Differences")
+        .ok()
+        .and_then(|value| resolve_array(doc, value))
+    else {
+        return false;
+    };
+
+    differences.iter().any(|item| {
+        let Ok(name_bytes) = item.as_name() else {
+            return false;
+        };
+        let name = String::from_utf8_lossy(name_bytes);
+        let base = name.split_once('.').map_or(name.as_ref(), |(base, _)| base);
+        let is_uni_name = base.starts_with("uni")
+            && base.len() >= 7
+            && base[3..7].chars().all(|ch| ch.is_ascii_hexdigit());
+        let is_u_name = base.starts_with('u')
+            && (5..=7).contains(&base.len())
+            && base[1..].chars().all(|ch| ch.is_ascii_hexdigit());
+        (is_uni_name || is_u_name) && glyph_to_char(&name).is_some()
+    })
+}
+
+/// Decode two-byte CIDs one at a time, using the embedded-font fallback only
+/// where the PDF's ToUnicode map is missing or explicitly contains U+FFFD.
+/// Keeping valid primary mappings prevents a partial font cmap from replacing
+/// correct document-provided text elsewhere in the same operand.
+fn decode_cids_with_fallback(
+    primary: &crate::tounicode::ToUnicodeCMap,
+    fallback: &crate::tounicode::ToUnicodeCMap,
+    bytes: &[u8],
+) -> String {
+    bytes
+        .chunks_exact(2)
+        .filter_map(|chunk| {
+            let cid = u16::from_be_bytes([chunk[0], chunk[1]]);
+            primary
+                .lookup(cid)
+                .filter(|text| !text.is_empty() && !text.contains('\u{FFFD}'))
+                .or_else(|| {
+                    fallback
+                        .lookup(cid)
+                        .filter(|text| !text.is_empty() && !text.contains('\u{FFFD}'))
+                })
+        })
+        .collect()
 }
 
 /// Fix a known producer bug in "TeXCMMathsSymbols" subset fonts (IntechOpen
@@ -1473,6 +1535,24 @@ fn score_text(text: &str) -> i32 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn cid_fallback_repairs_only_invalid_primary_mappings() {
+        let mut primary = crate::tounicode::ToUnicodeCMap::new();
+        primary.code_byte_length = 2;
+        primary.char_map.insert(1, "A".into());
+        primary.char_map.insert(2, "\u{FFFD}".into());
+
+        let mut fallback = crate::tounicode::ToUnicodeCMap::new();
+        fallback.code_byte_length = 2;
+        fallback.char_map.insert(1, "X".into());
+        fallback.char_map.insert(2, "B".into());
+
+        assert_eq!(
+            super::decode_cids_with_fallback(&primary, &fallback, &[0, 1, 0, 2]),
+            "AB"
+        );
+    }
 
     #[test]
     fn texcm_math_symbols_remap() {

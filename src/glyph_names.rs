@@ -4559,16 +4559,14 @@ pub fn glyph_to_char(name: &str) -> Option<char> {
 
     // Per Adobe Glyph List spec, strip the suffix after '.' to get the base glyph name.
     // E.g., "zero.tf" → "zero", "a.ss01" → "a", "hyphen.case" → "hyphen"
-    if let Some(dot_pos) = name.find('.') {
-        let base = &name[..dot_pos];
-        if let Some(&c) = GLYPH_TO_UNICODE.get(base) {
-            return Some(c);
-        }
+    let base = name.split_once('.').map_or(name, |(base, _)| base);
+    if let Some(&c) = GLYPH_TO_UNICODE.get(base) {
+        return Some(c);
     }
 
     // Try to parse uniXXXX format
-    if name.starts_with("uni") && name.len() >= 7 {
-        if let Ok(code) = u32::from_str_radix(&name[3..7], 16) {
+    if base.starts_with("uni") && base.len() >= 7 {
+        if let Ok(code) = u32::from_str_radix(&base[3..7], 16) {
             // Strip PUA F000 offset: uniF0XX → U+00XX (Windows Symbol encoding convention)
             let code = if (0xF000..=0xF0FF).contains(&code) {
                 code - 0xF000
@@ -4580,11 +4578,29 @@ pub fn glyph_to_char(name: &str) -> Option<char> {
     }
 
     // Try to parse uXXXX or uXXXXX format
-    if name.starts_with('u') && name.len() >= 5 {
-        if let Ok(code) = u32::from_str_radix(&name[1..], 16) {
+    if base.starts_with('u') && base.len() >= 5 {
+        if let Ok(code) = u32::from_str_radix(&base[1..], 16) {
             return char::from_u32(code);
         }
     }
 
     None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::glyph_to_char;
+
+    #[test]
+    fn parses_uni_glyph_names_with_shape_suffixes() {
+        assert_eq!(glyph_to_char("uni0628.i"), Some('\u{0628}'));
+        assert_eq!(glyph_to_char("uni0628.f"), Some('\u{0628}'));
+        assert_eq!(glyph_to_char("uni0628.m"), Some('\u{0628}'));
+        assert_eq!(glyph_to_char("uni0628.isol"), Some('\u{0628}'));
+    }
+
+    #[test]
+    fn parses_u_glyph_names_with_suffixes() {
+        assert_eq!(glyph_to_char("u1F642.alt"), Some('\u{1F642}'));
+    }
 }

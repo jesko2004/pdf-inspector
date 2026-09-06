@@ -1091,32 +1091,6 @@ fn glyph_name_to_string(name: &str) -> Option<String> {
     None
 }
 
-/// Build a ToUnicodeCMap from a font's glyph names (post table).
-/// Uses Adobe Glyph List to map glyph names to Unicode.
-fn build_cmap_from_glyph_names(face: &ttf_parser::Face<'_>) -> Option<ToUnicodeCMap> {
-    let mut cmap = ToUnicodeCMap::new();
-
-    for gid in 0..face.number_of_glyphs() {
-        let gid = ttf_parser::GlyphId(gid);
-        if let Some(name) = face.glyph_name(gid) {
-            if let Some(ch) = glyph_to_char(name) {
-                cmap.char_map.insert(gid.0, ch.to_string());
-            }
-        }
-    }
-
-    if cmap.char_map.is_empty() {
-        return None;
-    }
-
-    debug!(
-        "TrueType post glyph names: {} GID→Unicode entries",
-        cmap.char_map.len()
-    );
-    cmap.code_byte_length = 2;
-    Some(cmap)
-}
-
 fn build_gid_to_unicode(face: &ttf_parser::Face<'_>) -> Option<HashMap<u16, char>> {
     let mut gid_to_unicode: HashMap<u16, char> = HashMap::new();
 
@@ -1139,19 +1113,21 @@ fn build_gid_to_unicode(face: &ttf_parser::Face<'_>) -> Option<HashMap<u16, char
         });
     }
 
-    if gid_to_unicode.is_empty() {
-        return build_cmap_from_glyph_names(face).map(|cmap| {
-            let mut map = HashMap::new();
-            for (gid, s) in cmap.char_map {
-                if let Some(ch) = s.chars().next() {
-                    map.insert(gid, ch);
-                }
-            }
-            map
-        });
+    // A font cmap often omits alternate Arabic forms even though their post
+    // names contain the Unicode value (for example `uni0634.fina.alt`). Fill
+    // only the missing GIDs from glyph names so authoritative cmap mappings
+    // keep priority while alternates remain recoverable.
+    for gid_value in 0..face.number_of_glyphs() {
+        if gid_to_unicode.contains_key(&gid_value) {
+            continue;
+        }
+        let gid = ttf_parser::GlyphId(gid_value);
+        if let Some(ch) = face.glyph_name(gid).and_then(glyph_to_char) {
+            gid_to_unicode.insert(gid_value, ch);
+        }
     }
 
-    Some(gid_to_unicode)
+    (!gid_to_unicode.is_empty()).then_some(gid_to_unicode)
 }
 
 /// Build a ToUnicodeCMap from pdf.js built-in binary CMaps (bcmaps).
@@ -2039,12 +2015,20 @@ impl FontCMaps {
                 let (mut primary, mut remapped) =
                     try_remap_subset_cmap(cmap, font_dict, doc, obj_num);
 
-                // Only build expensive fallbacks when the primary CMap is sparse.
+                // Build a fallback when the primary CMap is sparse or explicitly
+                // maps some glyphs to U+FFFD. A large CMap can still be incomplete:
+                // generated font specimens commonly preserve known glyphs while
+                // marking unsupported entries as replacement characters.
                 // build_fallback_cmap_for_type0 can take seconds on large embedded
                 // TrueType fonts (decompressing + parsing 100K+ byte font files).
-                // Skip entirely when the primary CMap is sufficient.
+                // Skip entirely when every primary mapping is usable.
                 let primary_entries = primary.char_map.len() + primary.ranges.len();
-                let mut fallback = if primary_entries < 10 && !skip_truetype_fallback {
+                let needs_recovery = primary_entries < 10
+                    || primary
+                        .char_map
+                        .values()
+                        .any(|value| value.is_empty() || value.contains('\u{FFFD}'));
+                let mut fallback = if needs_recovery && !skip_truetype_fallback {
                     // Try cheap fallback first; only attempt expensive TrueType
                     // parsing if cheap fallbacks don't yield results.
                     let cheap = build_fallback_tounicode_from_encoding(font_dict, doc)
@@ -2054,7 +2038,7 @@ impl FontCMaps {
                     } else {
                         build_fallback_cmap_for_type0(font_dict, doc)
                     }
-                } else if primary_entries < 10 {
+                } else if needs_recovery {
                     // Fast mode: only try cheap fallbacks, skip TrueType parsing.
                     // Regions using this font will get needs_ocr=true.
                     build_fallback_tounicode_from_encoding(font_dict, doc)

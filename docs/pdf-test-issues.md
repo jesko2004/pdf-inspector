@@ -1,7 +1,7 @@
-﻿# PDF 测试问题登记表
+# PDF 测试问题登记表
 
 - 建立时间：2026-09-06（Asia/Shanghai）
-- 最近更新：2026-09-06 16:37:29（Asia/Shanghai）
+- 最近更新：2026-09-06 17:00:05（Asia/Shanghai）
 - 测试范围：两批本地非学术 PDF，共 40 份
 - 用途：集中记录回归测试发现的问题、建议方案和验收标准
 
@@ -14,7 +14,7 @@
 |3|PDF-003|2026-09-06|高|待修复|多栏正文被误判为 Markdown 表格|
 |4|PDF-004|2026-09-06|中|待修复|检测器与转换器的表格判断不一致|
 |5|PDF-005|2026-09-06|高|待修复|正常词典文本被误判为需要 OCR|
-|6|PDF-006|2026-09-06|高|待修复|阿拉伯文 Type1 字体被解码成乱码|
+|6|PDF-006|2026-09-06|高|已关闭|阿拉伯文字形映射不完整并产生重复警告|
 |7|PDF-007|2026-09-06|高|待修复|合法的非零起始偏移 PDF 被拒绝|
 |8|PDF-008|2026-09-06|中|待修复|特殊字形产生大量重复警告|
 |9|PDF-009|2026-09-06|中|待补充测试|仅检查 U+FFFD 无法发现全部乱码|
@@ -227,34 +227,59 @@
 
 ---
 
-## 6. PDF-006：阿拉伯文 Type1 字体被解码成乱码
+## 6. PDF-006：阿拉伯文字形映射不完整并产生重复警告
 
 - 发现时间：2026-09-06
+- 修复时间：2026-09-06 17:00:05（Asia/Shanghai）
 - 级别：高
-- 状态：待修复
-- 影响模块：`src/extractor/fonts.rs`、`src/tounicode.rs`、`src/text_utils.rs`
+- 状态：已关闭（实现完成并通过真实样本回归）
+- 影响模块：`src/glyph_names.rs`、`src/tounicode.rs`、`src/extractor/fonts.rs`、字体编码缓存
 
 ### 现象
 
-第二批 `13-arabic-font-specimen.pdf` 检测和转换均返回成功，但 Markdown 中没有阿拉伯 Unicode 字符，反而出现 339 个 CJK 字符和 15 个“锟”字符。日志同时出现 `InvalidEncodingDifferenceGlyph`。
+第二批 `13-arabic-font-specimen.pdf` 检测和转换均返回成功，但 Markdown 中仍有 15 个 U+FFFD 替换字符。日志同时重复出现 `InvalidEncodingDifferenceGlyph`，涉及 `uni0628.i` 等带阿拉伯位置变体后缀的 Type1 字形名。
+
+早期统计曾报告 0 个阿拉伯字符、339 个 CJK 字符和 15 个“锟”字符。复核文件原始 UTF-8 内容后确认，这是 PowerShell `Get-Content` 未指定 `-Encoding UTF8` 导致的测试脚本误读；修复前的实际输出包含 274 个阿拉伯字符、0 个 CJK 字符、0 个“锟”字符和 15 个 U+FFFD。后续字符统计均显式使用 UTF-8。
 
 ### 原因判断
 
-Type1 `/Encoding /Differences` 中的 `uni0628.i` 等阿拉伯字形名称没有正确解析。回退过程可能把字符编码值按错误代码页解释，生成了看似有效但语义完全错误的 Unicode 字符。
+1. 字形解析器能去掉 `.i`、`.f`、`.m`、`.isol` 等后缀，但去掉后缀后只查询固定字形表，没有继续解析 `uniXXXX` 和 `uXXXXX` 码点。
+2. Type0 内嵌 TrueType 字体的标准 cmap 没有覆盖部分阿拉伯变体字形；这些 GID 的 `post` 字形名仍包含可恢复的 Unicode，例如 `uni0634.fina.alt`。
+3. 大型 ToUnicode CMap 即使包含大量 U+FFFD，也因条目数充足而不会建立内嵌字体回退映射。
+4. lopdf 会再次解析已经由项目自定义逻辑处理的 Differences 字典，产生重复且体积较大的警告。
 
 ### 解决方案
 
-1. 优先使用有效的 ToUnicode CMap。
-2. 支持 Adobe Glyph List 以及 `uniXXXX`、`uXXXXX` 字形名称解析。
-3. 对 `.i`、`.f`、`.m`、`.isol` 等阿拉伯位置变体后缀先提取基础码点。
-4. 未知字形不能通过本地代码页强制转成 CJK；应保留可诊断占位并设置编码问题标志。
-5. 字符恢复后再执行 RTL/BiDi 排序与阿拉伯文字形处理。
+1. 字形名称去掉点号后缀后，继续执行 Adobe Glyph List、`uniXXXX` 和 `uXXXXX` 解析。
+2. 反转内嵌 TrueType cmap 后，再用 `post` 字形名补齐尚未映射的 GID；已有 cmap 映射仍保持最高优先级。
+3. ToUnicode 出现空值或 U+FFFD 时建立内嵌字体回退，并逐个 CID 使用回退值修复无效主映射，避免替换同一文本操作数中的正确主映射。
+4. 已建立自定义 Differences 映射的字体不再交给 lopdf 重复解析，消除 `InvalidEncodingDifferenceGlyph` 警告。
+5. 新增 `uni0628.i` 等后缀字形解析测试，以及“只修复无效 CID、保留有效主映射”的单元测试。
 
 ### 验收标准
 
 1. 输出包含正确的阿拉伯 Unicode 字符。
-2. 不再出现由回退产生的无关 CJK 字符和“锟”字符。
-3. `has_encoding_issues` 能准确反映无法恢复的字形。
+2. U+FFFD、无关 CJK 字符和“锟”字符均为 0。
+3. `InvalidEncodingDifferenceGlyph` 重复警告为 0。
+4. 页面数量、页面标记和已有拉丁文字内容保持完整。
+
+### 修复结果
+
+1. `13-arabic-font-specimen.pdf` 转换退出码为 0，5 个页面标记完整保留。
+2. 阿拉伯字符从 274 个增加到 331 个。
+3. U+FFFD 从 15 个降到 0；CJK 字符和“锟”字符均保持为 0。
+4. `InvalidEncodingDifferenceGlyph` 警告从 2 次降到 0。
+5. 修复前后的 UTF-8 输出和日志保存在 `test_output/pdf-006-verification/`，由 Git 忽略，不进入仓库。
+
+### 验证记录
+
+- `cargo fmt --all -- --check`：通过。
+- `cargo clippy --offline -- -D warnings`：通过，0 个 Clippy 警告。
+- `cargo test --offline`：通过，共 867 项（721 项库单元测试、1 项命令测试、143 项集成测试、2 项文档测试），0 项失败。
+- `cargo build --release --offline`：通过。
+- 两批 40 份本地 PDF 回归结果与 PDF-001 后一致：39 份检测成功、36 份直接转换、3 份进入 OCR、1 份命中 PDF-007。
+- 使用 UTF-8 重新统计后，381 个既有 U+FFFD 全部来自 `12-hk-bilingual-grant-form.pdf`；阿拉伯目标样本为 0。该结果说明原回归脚本的默认编码掩盖了替换字符，后续在 PDF-009 中继续完善自动质量检查。
+- 完整结果保存在 `test_output/all-40-after-pdf-006/`，不进入仓库。
 
 ---
 
