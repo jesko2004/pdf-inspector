@@ -1278,7 +1278,35 @@ fn starts_with_section_number(s: &str) -> bool {
 /// - Many empty cells (text doesn't span all columns)
 /// - Cells ending with hyphens (word breaks across "columns")
 /// - Long sentence fragments or single-word fragments
-fn is_paragraph_content(cells: &[Vec<String>]) -> bool {
+pub(super) fn is_paragraph_content(cells: &[Vec<String>]) -> bool {
+    is_paragraph_content_impl(cells, true)
+}
+
+pub(super) fn is_sustained_paragraph_content(cells: &[Vec<String>]) -> bool {
+    let filled: Vec<&str> = cells
+        .iter()
+        .flatten()
+        .map(|cell| cell.trim())
+        .filter(|cell| !cell.is_empty())
+        .collect();
+    if filled.len() < 4 {
+        return false;
+    }
+    let long_cells = filled
+        .iter()
+        .filter(|cell| cell.chars().count() > 60)
+        .count();
+    let long_ratio = long_cells as f32 / filled.len() as f32;
+    let avg_len = filled
+        .iter()
+        .map(|cell| cell.chars().count())
+        .sum::<usize>() as f32
+        / filled.len() as f32;
+
+    (avg_len > 40.0 && long_ratio > 0.2) || long_ratio > 0.3
+}
+
+fn is_paragraph_content_impl(cells: &[Vec<String>], detect_fragmented_flow: bool) -> bool {
     if cells.is_empty() {
         return false;
     }
@@ -1302,6 +1330,141 @@ fn is_paragraph_content(cells: &[Vec<String>]) -> bool {
     }
 
     let empty_ratio = 1.0 - (total_filled as f32 / total_cells as f32);
+
+    if detect_fragmented_flow {
+        let data_like_cells = filled
+            .iter()
+            .filter(|cell| looks_like_table_data(cell))
+            .count();
+
+        // A real column boundary should be populated throughout a table. In
+        // flowing two-column prose, incidental indents create one or more sparse
+        // interior anchors while the two actual text columns stay dense. This is
+        // especially common in dictionaries and scripts, where grammatical
+        // fragments also contain punctuation that would otherwise look tabular.
+        let column_fill_counts: Vec<usize> = (0..num_cols)
+            .map(|column| {
+                cells
+                    .iter()
+                    .filter(|row| row.get(column).is_some_and(|cell| !cell.trim().is_empty()))
+                    .count()
+            })
+            .collect();
+        let dense_columns = column_fill_counts
+            .iter()
+            .filter(|&&count| count * 4 >= cells.len() * 3)
+            .count();
+        let has_sparse_interior_column = column_fill_counts
+            .iter()
+            .enumerate()
+            .skip(1)
+            .take(num_cols.saturating_sub(2))
+            .any(|(_, &count)| count * 2 <= cells.len());
+        let prose_fragments = filled
+            .iter()
+            .filter(|cell| {
+                let alpha_words = cell
+                    .split_whitespace()
+                    .filter(|word| word.chars().any(char::is_alphabetic))
+                    .count();
+                alpha_words >= 2
+                    || cell.ends_with('.')
+                    || cell.ends_with(',')
+                    || cell.ends_with(';')
+                    || cell.ends_with(':')
+            })
+            .count();
+        if cells.len() >= 4
+            && dense_columns >= 2
+            && has_sparse_interior_column
+            && prose_fragments * 5 >= total_filled * 3
+            && data_like_cells * 5 < total_filled
+        {
+            return true;
+        }
+
+        // Long multi-column articles may align consistently for dozens of
+        // baselines even without sparse anchor columns. If most occupied cells
+        // are sentence-sized alphabetic fragments and almost none resemble
+        // data, the grid is a reading-order layout rather than a table.
+        let sentence_cells = filled
+            .iter()
+            .filter(|cell| {
+                cell.chars().count() >= 25
+                    && cell
+                        .split_whitespace()
+                        .filter(|word| word.chars().any(char::is_alphabetic))
+                        .count()
+                        >= 5
+            })
+            .count();
+        if cells.len() >= 12
+            && num_cols >= 3
+            && sentence_cells * 2 >= total_filled
+            && data_like_cells * 5 < total_filled
+        {
+            return true;
+        }
+
+        // A two-line quotation can produce only a handful of occupied cells, but
+        // still contain enough connected words and punctuation to prove that it
+        // is prose rather than a header plus one data row.
+        if cells.len() <= 2 && num_cols >= 3 && data_like_cells == 0 {
+            let alpha_words = filled
+                .iter()
+                .flat_map(|cell| cell.split_whitespace())
+                .filter(|word| word.chars().any(char::is_alphabetic))
+                .count();
+            let punctuated_cells = filled
+                .iter()
+                .filter(|cell| {
+                    cell.chars()
+                        .any(|ch| matches!(ch, '.' | ',' | ';' | ':' | '!' | '?'))
+                })
+                .count();
+            if alpha_words >= 8 && punctuated_cells >= 2 {
+                return true;
+            }
+        }
+
+        // A few prose baselines can be fragmented into many word-sized columns.
+        // With no numeric/data evidence, a wide grid whose cells predominantly
+        // begin with lowercase words is sentence flow, not a table. Longer runs
+        // also need a wrapping signal so ordinary text-only matrices remain valid.
+        if num_cols >= 5 && total_filled >= 8 && data_like_cells == 0 {
+            let lowercase_starts = filled
+                .iter()
+                .filter(|cell| {
+                    cell.chars()
+                        .find(|ch| ch.is_alphabetic())
+                        .is_some_and(char::is_lowercase)
+                })
+                .count();
+            let short_alpha_cells = filled
+                .iter()
+                .filter(|cell| {
+                    cell.chars().count() <= 20
+                        && cell.chars().any(char::is_alphabetic)
+                        && !cell.chars().any(|ch| ch.is_ascii_digit())
+                })
+                .count();
+            let has_wrapped_prose = filled.iter().any(|cell| {
+                cell.chars().count() > 40
+                    || (cell.ends_with('-')
+                        && cell
+                            .chars()
+                            .rev()
+                            .nth(1)
+                            .is_some_and(|ch| ch.is_alphabetic()))
+            });
+            if lowercase_starts * 5 >= total_filled * 3
+                && short_alpha_cells * 2 >= total_filled
+                && (cells.len() <= 4 || has_wrapped_prose)
+            {
+                return true;
+            }
+        }
+    }
 
     // Cells ending with a hyphen suggest word breaks across columns.
     // Real table cells almost never end with hyphens (except range indicators).
@@ -2166,5 +2329,112 @@ mod tests {
             vec!["Section D".into(), "TBD".into()],
         ];
         assert!(!is_page_number_toc(&cells));
+    }
+
+    #[test]
+    fn paragraph_content_rejects_sparse_anchors_between_prose_columns() {
+        let cells = vec![
+            vec![
+                "Remind your people to obey the".into(),
+                "".into(),
+                "arguments about ancestors. And stay".into(),
+            ],
+            vec![
+                "rulers and authorities and not".into(),
+                "".into(),
+                "away from disagreements and".into(),
+            ],
+            vec![
+                "ready to do something helpful".into(),
+                "".into(),
+                "Such arguments are useless and".into(),
+            ],
+            vec![
+                "should be gentle and kind to".into(),
+                "".into(),
+                "once or twice. Then don't have".into(),
+            ],
+        ];
+
+        assert!(is_paragraph_content(&cells));
+    }
+
+    #[test]
+    fn paragraph_content_rejects_word_sized_prose_grid() {
+        let cells = vec![
+            vec![
+                "forced".into(),
+                "to".into(),
+                "come".into(),
+                "to the".into(),
+                "surface".into(),
+                "again".into(),
+            ],
+            vec![
+                "hurry,".into(),
+                "spluttering".into(),
+                "and".into(),
+                "angry".into(),
+                "and".into(),
+                "shaking".into(),
+            ],
+        ];
+
+        assert!(is_paragraph_content(&cells));
+    }
+
+    #[test]
+    fn paragraph_content_rejects_sparse_two_line_quotation() {
+        let cells = vec![
+            vec![
+                "the woodland wet—Strays I find in it, wounds".into(),
+                "".into(),
+                "".into(),
+                "".into(),
+            ],
+            vec![
+                "I bind".into(),
+                "in it—Bidding".into(),
+                "all forget!".into(),
+                "".into(),
+            ],
+        ];
+
+        assert!(is_paragraph_content(&cells));
+    }
+
+    #[test]
+    fn paragraph_content_keeps_sparse_text_table_with_data() {
+        let cells = vec![
+            vec![
+                "Region".into(),
+                "Notes".into(),
+                "2024".into(),
+                "2025".into(),
+            ],
+            vec!["North".into(), "".into(), "120".into(), "135".into()],
+            vec![
+                "South".into(),
+                "provisional".into(),
+                "98".into(),
+                "101".into(),
+            ],
+            vec!["West".into(), "".into(), "76".into(), "82".into()],
+        ];
+
+        assert!(!is_paragraph_content(&cells));
+    }
+
+    #[test]
+    fn paragraph_content_rejects_dense_multicolumn_article() {
+        let row = vec![
+            "The report explains how employees should record each workplace incident.".into(),
+            "Additional guidance applies when an injury results from repeated exposure.".into(),
+            "Medical treatment includes managing and caring for the affected worker.".into(),
+            "Employers should retain these records and review each case every year.".into(),
+        ];
+        let cells = vec![row; 12];
+
+        assert!(is_paragraph_content(&cells));
     }
 }

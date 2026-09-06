@@ -9,6 +9,7 @@ use std::collections::HashSet;
 use crate::tables::Table;
 use crate::types::{PdfLine, TextItem};
 
+use super::detect_heuristic::is_sustained_paragraph_content;
 use super::detect_rects::{assign_items_to_grid, snap_edges};
 
 const RULE_Y_TOLERANCE: f32 = 2.0;
@@ -1499,6 +1500,14 @@ fn detect_tables_from_lines_inner(
             .count();
         let density = filled_cells as f32 / total_cells as f32;
         if density < 0.15 {
+            return select_table_hypothesis(Vec::new(), alternatives, page);
+        }
+        // Decorative rules in magazines and newsletters can surround a
+        // complete multi-column article. Such false grids are densely filled
+        // with sustained prose. Keep sparse forms, whose large blank writing
+        // areas legitimately yield a low cell density.
+        if density >= 0.5 && is_sustained_paragraph_content(&cells) {
+            log::debug!("detect_lines p{}: rejected dense prose-like grid", page);
             return select_table_hypothesis(Vec::new(), alternatives, page);
         }
     }
