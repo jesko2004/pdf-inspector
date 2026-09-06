@@ -1652,7 +1652,11 @@ pub(crate) fn to_markdown_from_items_with_rects_and_lines(
     };
 
     // Merge continuation tables across page breaks, but only for table-only pages
-    merge_continuation_tables(&mut page_tables, &table_only_pages);
+    merge_continuation_tables(
+        &mut page_tables,
+        &table_only_pages,
+        options.include_page_numbers,
+    );
 
     // Collect pages that have detected tables — used to suppress relative valley
     // column detection on pages where table column gaps would be misidentified.
