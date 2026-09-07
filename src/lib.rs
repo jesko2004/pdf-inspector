@@ -6228,6 +6228,20 @@ mod tests {
             !is_cid_garbage(tex_ligature),
             "A single TeX ligature byte inside a word should not be CID garbage"
         );
+
+        for icelandic_headword in ["þjá (þjá, þjáða, þjáðr), v.", "þrá (þrá, þráða, þráðr), v."]
+        {
+            assert!(
+                !is_cid_garbage(icelandic_headword),
+                "accent-heavy Icelandic headwords should remain valid text"
+            );
+        }
+
+        let symbol_rich_mojibake = "éáöþðæ £¢¥ éáöþðæ £¢¥ éáöþðæ";
+        assert!(
+            is_cid_garbage(symbol_rich_mojibake),
+            "symbol-rich Latin-1 mojibake should still be detected"
+        );
     }
 
     #[test]
