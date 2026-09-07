@@ -9,7 +9,8 @@ use std::collections::HashMap;
 
 use super::fonts::{
     build_font_encodings, build_font_widths, compute_string_width_ts, extract_text_from_operand,
-    get_font_file2_obj_num, get_operand_bytes, CMapDecisionCache, FontStyleCache,
+    font_encoding_requires_custom_parser, get_font_file2_obj_num, get_operand_bytes,
+    CMapDecisionCache, FontStyleCache,
 };
 use super::{get_number, image_bbox_from_ctm, multiply_matrices};
 
@@ -212,6 +213,9 @@ fn extract_form_xobject_text_inner(
     let mut encoding_cache: HashMap<String, Encoding<'_>> = HashMap::new();
     for (font_name, font_dict) in &form_fonts {
         let name = String::from_utf8_lossy(font_name).to_string();
+        if font_encoding_requires_custom_parser(doc, font_dict) {
+            continue;
+        }
         if let Ok(enc) = font_dict.get_font_encoding(doc) {
             encoding_cache.insert(name, enc);
         }

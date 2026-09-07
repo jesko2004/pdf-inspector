@@ -532,7 +532,10 @@ pub fn extract_pages_markdown_mem(
                 options,
                 &page_rects,
                 &[],
-                &page_thresholds,
+                markdown::MarkdownPageContext {
+                    thresholds: &page_thresholds,
+                    source_page_count: None,
+                },
                 None,
                 &[],
             )
@@ -3541,17 +3544,8 @@ fn contains_recent_eof_marker(buf: &[u8]) -> bool {
 }
 
 fn strip_leading_pdf_container_bytes(buf: &[u8]) -> Option<Vec<u8>> {
-    let mut start = if buf.starts_with(&[0xEF, 0xBB, 0xBF]) {
-        3
-    } else {
-        0
-    };
-
-    while start < buf.len() && buf[start].is_ascii_whitespace() {
-        start += 1;
-    }
-
-    if start > 0 && buf[start..].starts_with(b"%PDF-") {
+    let start = find_pdf_header_offset(buf)?;
+    if start > 0 {
         Some(buf[start..].to_vec())
     } else {
         None
@@ -3747,7 +3741,10 @@ fn process_document(
                     options.markdown,
                     &rects,
                     &lines,
-                    &page_thresholds,
+                    markdown::MarkdownPageContext {
+                        thresholds: &page_thresholds,
+                        source_page_count: Some(page_count),
+                    },
                     struct_roles.as_ref(),
                     &struct_tables,
                 ))
@@ -5749,18 +5746,28 @@ fn detect_file_type_hint(bytes: &[u8]) -> String {
     "file is not a PDF".to_string()
 }
 
-/// Validate that a byte buffer looks like a PDF (has `%PDF-` magic).
+/// Find a syntactically valid PDF header in the first 1024 bytes.
+fn find_pdf_header_offset(buffer: &[u8]) -> Option<usize> {
+    let header = &buffer[..buffer.len().min(1024)];
+    header.windows(8).position(|window| {
+        window.starts_with(b"%PDF-")
+            && window[5].is_ascii_digit()
+            && window[6] == b'.'
+            && window[7].is_ascii_digit()
+    })
+}
+
+/// Validate that a byte buffer looks like a PDF (has `%PDF-x.y` magic).
 ///
-/// Scans the first 1024 bytes, allowing for a UTF-8 BOM and leading whitespace.
+/// PDF 2.0 permits application or printer-control data before the header, so
+/// the complete first 1024 bytes are searched instead of accepting whitespace
+/// prefixes only.
 pub(crate) fn validate_pdf_bytes(buffer: &[u8]) -> Result<(), PdfError> {
     if buffer.is_empty() {
         return Err(PdfError::NotAPdf(detect_file_type_hint(buffer)));
     }
 
-    let header = &buffer[..buffer.len().min(1024)];
-    let trimmed = strip_bom_and_whitespace(header);
-
-    if trimmed.starts_with(b"%PDF-") {
+    if find_pdf_header_offset(buffer).is_some() {
         Ok(())
     } else {
         Err(PdfError::NotAPdf(detect_file_type_hint(buffer)))
@@ -6226,6 +6233,20 @@ mod tests {
         assert!(
             !is_cid_garbage(tex_ligature),
             "A single TeX ligature byte inside a word should not be CID garbage"
+        );
+
+        for icelandic_headword in ["þjá (þjá, þjáða, þjáðr), v.", "þrá (þrá, þráða, þráðr), v."]
+        {
+            assert!(
+                !is_cid_garbage(icelandic_headword),
+                "accent-heavy Icelandic headwords should remain valid text"
+            );
+        }
+
+        let symbol_rich_mojibake = "éáöþðæ £¢¥ éáöþðæ £¢¥ éáöþðæ";
+        assert!(
+            is_cid_garbage(symbol_rich_mojibake),
+            "symbol-rich Latin-1 mojibake should still be detected"
         );
     }
 

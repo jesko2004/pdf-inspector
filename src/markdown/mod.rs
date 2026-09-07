@@ -22,9 +22,14 @@ use crate::types::{PdfLine, PdfRect, TextItem};
 use analysis::calculate_font_stats_from_items;
 use classify::{format_list_item, is_caption_line, is_code_like, is_list_item};
 use convert::{
-    merge_continuation_tables, to_markdown_from_lines_with_tables_and_images, ChartProseOrder,
-    PositionedMarkdown,
+    merge_continuation_tables, to_markdown_from_lines_with_tables_images_and_page_count,
+    ChartProseOrder, PageOutputContext, PositionedMarkdown,
 };
+
+pub(crate) struct MarkdownPageContext<'a> {
+    pub(crate) thresholds: &'a HashMap<u32, f32>,
+    pub(crate) source_page_count: Option<u32>,
+}
 
 const CHART_REGION_PAD: f32 = 20.0;
 const CHART_SEPARATOR_PAD: f32 = 8.0;
@@ -376,6 +381,36 @@ fn looks_like_numbered_section_heading(text: &str) -> bool {
 
 fn merged_retry_skips_body_font(detected_columns: bool, has_chart_regions: bool) -> bool {
     detected_columns && !has_chart_regions
+}
+
+/// A tagged table can occupy only a small part of a text-heavy page. Global
+/// page coverage is then low even though every cell in the table matched a
+/// concrete text item. Treat that self-contained structure as sufficient
+/// evidence instead of forcing a page-wide geometry fallback.
+fn is_self_contained_struct_table(table: &crate::tables::Table) -> bool {
+    let row_count = table.cells.len();
+    let column_count = table.cells.iter().map(Vec::len).max().unwrap_or(0);
+    if row_count < 3 || column_count != 2 {
+        return false;
+    }
+
+    let populated_cells = table
+        .cells
+        .iter()
+        .flatten()
+        .filter(|cell| !cell.trim().is_empty())
+        .count();
+    let dense_rows = table
+        .cells
+        .iter()
+        .filter(|row| {
+            row.iter().filter(|cell| !cell.trim().is_empty()).count() * 4 >= column_count * 3
+        })
+        .count();
+
+    populated_cells >= row_count * 2
+        && dense_rows * 4 >= row_count * 3
+        && table.item_indices.len() >= populated_cells
 }
 
 /// Reject a heuristic table only when its cells are overwhelmingly parallel
@@ -981,7 +1016,10 @@ pub fn to_markdown_from_items_with_rects(
         options,
         rects,
         &[],
-        &HashMap::new(),
+        MarkdownPageContext {
+            thresholds: &HashMap::new(),
+            source_page_count: None,
+        },
         None,
         &[],
     )
@@ -996,7 +1034,7 @@ pub(crate) fn to_markdown_from_items_with_rects_and_lines(
     options: MarkdownOptions,
     rects: &[crate::types::PdfRect],
     pdf_lines: &[crate::types::PdfLine],
-    page_thresholds: &HashMap<u32, f32>,
+    page_context: MarkdownPageContext<'_>,
     struct_roles: Option<&HashMap<u32, HashMap<i64, crate::structure_tree::StructRole>>>,
     struct_tables: &[crate::structure_tree::StructTable],
 ) -> String {
@@ -1006,7 +1044,14 @@ pub(crate) fn to_markdown_from_items_with_rects_and_lines(
     };
     use crate::types::ItemType;
 
-    if items.is_empty() {
+    let MarkdownPageContext {
+        thresholds: page_thresholds,
+        source_page_count,
+    } = page_context;
+
+    if items.is_empty()
+        && !(options.include_page_numbers && source_page_count.is_some_and(|count| count > 0))
+    {
         return String::new();
     }
 
@@ -1252,7 +1297,7 @@ pub(crate) fn to_markdown_from_items_with_rects_and_lines(
                 let st_tables = detect_tables_from_struct_tree(band_items, struct_tables, page);
                 for table in &st_tables {
                     let coverage = table.item_indices.len() as f32 / band_items.len().max(1) as f32;
-                    if coverage < 0.5 {
+                    if coverage < 0.5 && !is_self_contained_struct_table(table) {
                         continue;
                     }
                     for &idx in &table.item_indices {
@@ -1820,13 +1865,16 @@ pub(crate) fn to_markdown_from_items_with_rects_and_lines(
     // Convert to markdown, inserting tables and images at appropriate positions
     let mut band_split_page_set: HashSet<u32> = page_band_splits.keys().copied().collect();
     band_split_page_set.extend(page_chart_prose_splits.keys().copied());
-    to_markdown_from_lines_with_tables_and_images(
+    to_markdown_from_lines_with_tables_images_and_page_count(
         lines,
         options,
         page_tables,
         page_images,
         &page_chart_map,
-        &band_split_page_set,
+        PageOutputContext {
+            band_split_pages: &band_split_page_set,
+            source_page_count,
+        },
         effective_struct_roles,
     )
 }
@@ -1898,6 +1946,33 @@ mod tests {
         let md = to_markdown(text, MarkdownOptions::default());
         assert!(md.contains("- First item"));
         assert!(md.contains("- Second item"));
+    }
+
+    #[test]
+    fn empty_items_preserve_known_physical_pages() {
+        let options = MarkdownOptions {
+            include_page_numbers: true,
+            ..MarkdownOptions::default()
+        };
+        let md = to_markdown_from_items_with_rects_and_lines(
+            Vec::new(),
+            options,
+            &[],
+            &[],
+            MarkdownPageContext {
+                thresholds: &HashMap::new(),
+                source_page_count: Some(2),
+            },
+            None,
+            &[],
+        );
+
+        assert_eq!(
+            md.lines()
+                .filter(|line| line.starts_with("<!-- Page "))
+                .collect::<Vec<_>>(),
+            ["<!-- Page 1 -->", "<!-- Page 2 -->"]
+        );
     }
 
     fn make_item(x: f32, y: f32, page: u32) -> TextItem {
@@ -2429,5 +2504,37 @@ mod tests {
             split.is_empty(),
             "label+number table should not be split side-by-side"
         );
+    }
+
+    #[test]
+    fn complete_tagged_table_survives_low_page_coverage() {
+        let table = crate::tables::Table::new(
+            vec![10.0, 100.0],
+            vec![30.0, 20.0, 10.0],
+            vec![
+                vec!["Account type".into(), "Owner".into()],
+                vec!["Individual".into(), "The individual".into()],
+                vec!["Trust".into(), "The trustee".into()],
+            ],
+            (0..6).collect(),
+        );
+
+        assert!(is_self_contained_struct_table(&table));
+    }
+
+    #[test]
+    fn partial_tagged_structure_still_needs_page_coverage() {
+        let table = crate::tables::Table::new(
+            vec![10.0, 100.0],
+            vec![30.0, 20.0, 10.0],
+            vec![
+                vec!["Account type".into(), "Owner".into()],
+                vec!["Individual".into(), "".into()],
+                vec!["Trust".into(), "".into()],
+            ],
+            vec![0, 1, 2, 3],
+        );
+
+        assert!(!is_self_contained_struct_table(&table));
     }
 }

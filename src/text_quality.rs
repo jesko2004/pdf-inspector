@@ -484,6 +484,7 @@ pub(crate) fn is_cid_garbage(text: &str) -> bool {
     let mut total = 0usize;
     let mut c1_control = 0usize;
     let mut high_latin = 0usize;
+    let mut high_latin_symbols = 0usize;
     for ch in text.chars() {
         if ch.is_whitespace() {
             continue;
@@ -501,6 +502,9 @@ pub(crate) fn is_cid_garbage(text: &str) -> bool {
         // from CID values being misinterpreted as Latin-1 characters.
         if ('\u{00A0}'..='\u{00FF}').contains(&ch) {
             high_latin += 1;
+            if !ch.is_alphanumeric() {
+                high_latin_symbols += 1;
+            }
         }
     }
     if total < 5 {
@@ -515,6 +519,11 @@ pub(crate) fn is_cid_garbage(text: &str) -> bool {
     // where CID values 0x80-0xFF become accented Latin characters).  Keep a
     // minimum length so short math tokens like "2×()×" do not route a clean
     // page to OCR.
+    // A high accented-letter ratio is valid in languages such as Icelandic;
+    // require Latin-1 symbols as additional evidence of byte-level mojibake.
     let ascii_letters = text.chars().filter(|c| c.is_ascii_alphabetic()).count();
-    total >= 20 && high_latin * 5 >= total * 2 && ascii_letters * 3 < total
+    total >= 20
+        && high_latin * 5 >= total * 2
+        && high_latin_symbols >= 3
+        && ascii_letters * 3 < total
 }

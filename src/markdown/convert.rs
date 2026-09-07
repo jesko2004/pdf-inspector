@@ -48,6 +48,11 @@ pub(super) struct PositionedMarkdown {
     chart_order: Option<ChartProseOrder>,
 }
 
+pub(super) struct PageOutputContext<'a> {
+    pub(super) band_split_pages: &'a HashSet<u32>,
+    pub(super) source_page_count: Option<u32>,
+}
+
 impl PositionedMarkdown {
     pub(super) fn new(
         y: f32,
@@ -683,6 +688,7 @@ fn flush_page_tables_and_images(
 }
 
 /// Convert text lines to markdown, inserting tables and images at appropriate Y positions
+#[cfg(test)]
 pub(super) fn to_markdown_from_lines_with_tables_and_images(
     lines: Vec<TextLine>,
     options: MarkdownOptions,
@@ -694,7 +700,40 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
         &std::collections::HashMap<u32, std::collections::HashMap<i64, StructRole>>,
     >,
 ) -> String {
-    if lines.is_empty() && page_tables.is_empty() && page_images.is_empty() {
+    to_markdown_from_lines_with_tables_images_and_page_count(
+        lines,
+        options,
+        page_tables,
+        page_images,
+        page_chart_regions,
+        PageOutputContext {
+            band_split_pages,
+            source_page_count: None,
+        },
+        struct_roles,
+    )
+}
+
+pub(super) fn to_markdown_from_lines_with_tables_images_and_page_count(
+    lines: Vec<TextLine>,
+    options: MarkdownOptions,
+    page_tables: std::collections::HashMap<u32, Vec<PositionedMarkdown>>,
+    page_images: std::collections::HashMap<u32, Vec<PositionedMarkdown>>,
+    page_chart_regions: &std::collections::HashMap<u32, Vec<(f32, f32, f32, f32)>>,
+    page_context: PageOutputContext<'_>,
+    struct_roles: Option<
+        &std::collections::HashMap<u32, std::collections::HashMap<i64, StructRole>>,
+    >,
+) -> String {
+    let PageOutputContext {
+        band_split_pages,
+        source_page_count,
+    } = page_context;
+    if lines.is_empty()
+        && page_tables.is_empty()
+        && page_images.is_empty()
+        && !(options.include_page_numbers && source_page_count.is_some_and(|count| count > 0))
+    {
         return String::new();
     }
 
@@ -828,15 +867,20 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
                 output.push_str("\n\n");
             }
 
-            // Flush any intermediate pages (image-only or table-only) between
-            // current_page and line.page that have no text lines
-            for &p in &all_content_pages {
-                if p <= current_page {
-                    continue;
-                }
-                if p >= line.page {
-                    break;
-                }
+            // Flush intermediate pages that have no text lines. When the
+            // physical page count is known, emit every page marker so blank
+            // and image-only pages retain their original positions.
+            let intermediate_pages: Vec<u32> =
+                if options.include_page_numbers && source_page_count.is_some() {
+                    ((current_page + 1)..line.page).collect()
+                } else {
+                    all_content_pages
+                        .iter()
+                        .copied()
+                        .filter(|&p| p > current_page && p < line.page)
+                        .collect()
+                };
+            for p in intermediate_pages {
                 if options.include_page_numbers {
                     output.push_str(&format!("<!-- Page {} -->\n\n", p));
                 }
@@ -1230,10 +1274,24 @@ pub(super) fn to_markdown_from_lines_with_tables_and_images(
         &mut output,
         &mut in_paragraph,
     );
-    for &p in &all_content_pages {
-        if p <= current_page {
-            continue;
+    let trailing_pages: Vec<u32> = if options.include_page_numbers {
+        if let Some(page_count) = source_page_count {
+            ((current_page + 1)..=page_count).collect()
+        } else {
+            all_content_pages
+                .iter()
+                .copied()
+                .filter(|&p| p > current_page)
+                .collect()
         }
+    } else {
+        all_content_pages
+            .iter()
+            .copied()
+            .filter(|&p| p > current_page)
+            .collect()
+    };
+    for p in trailing_pages {
         if options.include_page_numbers {
             output.push_str(&format!("\n\n<!-- Page {} -->\n\n", p));
         }
@@ -1703,6 +1761,58 @@ mod tests {
         let table = md.find("| Header |").unwrap();
         let page_3 = md.find("<!-- Page 3 -->").unwrap();
         assert!(page_1 < page_2 && page_2 < table && table < page_3, "{md}");
+    }
+
+    #[test]
+    fn physical_page_count_preserves_blank_page_markers() {
+        let options = MarkdownOptions {
+            include_page_numbers: true,
+            ..MarkdownOptions::default()
+        };
+        let md = to_markdown_from_lines_with_tables_images_and_page_count(
+            vec![line_at("Only page two has text.", 2, 700.0)],
+            options,
+            HashMap::new(),
+            HashMap::new(),
+            &HashMap::new(),
+            PageOutputContext {
+                band_split_pages: &HashSet::new(),
+                source_page_count: Some(3),
+            },
+            None,
+        );
+
+        let markers: Vec<&str> = md
+            .lines()
+            .filter(|line| line.starts_with("<!-- Page "))
+            .collect();
+        assert_eq!(
+            markers,
+            ["<!-- Page 1 -->", "<!-- Page 2 -->", "<!-- Page 3 -->"]
+        );
+    }
+
+    #[test]
+    fn physical_page_count_marks_an_entirely_empty_document() {
+        let options = MarkdownOptions {
+            include_page_numbers: true,
+            ..MarkdownOptions::default()
+        };
+        let md = to_markdown_from_lines_with_tables_images_and_page_count(
+            Vec::new(),
+            options,
+            HashMap::new(),
+            HashMap::new(),
+            &HashMap::new(),
+            PageOutputContext {
+                band_split_pages: &HashSet::new(),
+                source_page_count: Some(2),
+            },
+            None,
+        );
+
+        assert!(md.contains("<!-- Page 1 -->"));
+        assert!(md.contains("<!-- Page 2 -->"));
     }
 
     #[test]
