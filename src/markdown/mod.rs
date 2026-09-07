@@ -22,9 +22,14 @@ use crate::types::{PdfLine, PdfRect, TextItem};
 use analysis::calculate_font_stats_from_items;
 use classify::{format_list_item, is_caption_line, is_code_like, is_list_item};
 use convert::{
-    merge_continuation_tables, to_markdown_from_lines_with_tables_and_images, ChartProseOrder,
-    PositionedMarkdown,
+    merge_continuation_tables, to_markdown_from_lines_with_tables_images_and_page_count,
+    ChartProseOrder, PageOutputContext, PositionedMarkdown,
 };
+
+pub(crate) struct MarkdownPageContext<'a> {
+    pub(crate) thresholds: &'a HashMap<u32, f32>,
+    pub(crate) source_page_count: Option<u32>,
+}
 
 const CHART_REGION_PAD: f32 = 20.0;
 const CHART_SEPARATOR_PAD: f32 = 8.0;
@@ -1011,7 +1016,10 @@ pub fn to_markdown_from_items_with_rects(
         options,
         rects,
         &[],
-        &HashMap::new(),
+        MarkdownPageContext {
+            thresholds: &HashMap::new(),
+            source_page_count: None,
+        },
         None,
         &[],
     )
@@ -1026,7 +1034,7 @@ pub(crate) fn to_markdown_from_items_with_rects_and_lines(
     options: MarkdownOptions,
     rects: &[crate::types::PdfRect],
     pdf_lines: &[crate::types::PdfLine],
-    page_thresholds: &HashMap<u32, f32>,
+    page_context: MarkdownPageContext<'_>,
     struct_roles: Option<&HashMap<u32, HashMap<i64, crate::structure_tree::StructRole>>>,
     struct_tables: &[crate::structure_tree::StructTable],
 ) -> String {
@@ -1036,7 +1044,14 @@ pub(crate) fn to_markdown_from_items_with_rects_and_lines(
     };
     use crate::types::ItemType;
 
-    if items.is_empty() {
+    let MarkdownPageContext {
+        thresholds: page_thresholds,
+        source_page_count,
+    } = page_context;
+
+    if items.is_empty()
+        && !(options.include_page_numbers && source_page_count.is_some_and(|count| count > 0))
+    {
         return String::new();
     }
 
@@ -1850,13 +1865,16 @@ pub(crate) fn to_markdown_from_items_with_rects_and_lines(
     // Convert to markdown, inserting tables and images at appropriate positions
     let mut band_split_page_set: HashSet<u32> = page_band_splits.keys().copied().collect();
     band_split_page_set.extend(page_chart_prose_splits.keys().copied());
-    to_markdown_from_lines_with_tables_and_images(
+    to_markdown_from_lines_with_tables_images_and_page_count(
         lines,
         options,
         page_tables,
         page_images,
         &page_chart_map,
-        &band_split_page_set,
+        PageOutputContext {
+            band_split_pages: &band_split_page_set,
+            source_page_count,
+        },
         effective_struct_roles,
     )
 }
@@ -1928,6 +1946,33 @@ mod tests {
         let md = to_markdown(text, MarkdownOptions::default());
         assert!(md.contains("- First item"));
         assert!(md.contains("- Second item"));
+    }
+
+    #[test]
+    fn empty_items_preserve_known_physical_pages() {
+        let options = MarkdownOptions {
+            include_page_numbers: true,
+            ..MarkdownOptions::default()
+        };
+        let md = to_markdown_from_items_with_rects_and_lines(
+            Vec::new(),
+            options,
+            &[],
+            &[],
+            MarkdownPageContext {
+                thresholds: &HashMap::new(),
+                source_page_count: Some(2),
+            },
+            None,
+            &[],
+        );
+
+        assert_eq!(
+            md.lines()
+                .filter(|line| line.starts_with("<!-- Page "))
+                .collect::<Vec<_>>(),
+            ["<!-- Page 1 -->", "<!-- Page 2 -->"]
+        );
     }
 
     fn make_item(x: f32, y: f32, page: u32) -> TextItem {
