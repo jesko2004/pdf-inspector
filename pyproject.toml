@@ -22,5 +22,16 @@ Homepage = "https://github.com/jesko2004/pdf-inspector"
 Repository = "https://github.com/jesko2004/pdf-inspector"
 Documentation = "https://github.com/jesko2004/pdf-inspector/blob/main/docs/python.md"
 
+[project.optional-dependencies]
+backend = [
+    "fastapi>=0.115,<1",
+    "uvicorn[standard]>=0.30,<1",
+    "python-multipart>=0.0.9,<1",
+]
+
+[project.scripts]
+pdf-inspector-api = "backend.server:run"
+
 [tool.maturin]
 features = ["python"]
+python-packages = ["backend"]
