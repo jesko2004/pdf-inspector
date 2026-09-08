@@ -62,12 +62,59 @@ class FieldRule(BaseModel):
         return self
 
 
+class TableColumnRule(BaseModel):
+    """Canonical business column and the source headers that may represent it."""
+
+    model_config = ConfigDict(extra="forbid")
+    aliases: list[str] = Field(min_length=1, max_length=30)
+    type: Literal["text", "decimal", "integer", "unit"] = "text"
+    required: bool = False
+    min_value: Decimal | None = None
+    max_value: Decimal | None = None
+
+    @model_validator(mode="after")
+    def validate_rule(self):
+        if any(not alias.strip() for alias in self.aliases):
+            raise ValueError("aliases must not be blank")
+        self.aliases = list(dict.fromkeys(alias.strip() for alias in self.aliases))
+        bounds = (self.min_value, self.max_value)
+        if any(value is not None and not value.is_finite() for value in bounds):
+            raise ValueError("numeric bounds must be finite")
+        if any(value is not None for value in bounds) and self.type not in {
+            "decimal",
+            "integer",
+        }:
+            raise ValueError("numeric bounds require decimal or integer type")
+        if (
+            all(value is not None for value in bounds)
+            and self.min_value > self.max_value
+        ):
+            raise ValueError("min_value must not exceed max_value")
+        return self
+
+
+class TableRule(BaseModel):
+    """Schema used to recognize and normalize a Markdown table."""
+
+    model_config = ConfigDict(extra="forbid")
+    columns: dict[str, TableColumnRule] = Field(min_length=1, max_length=50)
+    required: bool = False
+
+    @model_validator(mode="after")
+    def validate_columns(self):
+        for name in self.columns:
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", name):
+                raise ValueError("table column names must be lower-case identifiers")
+        return self
+
+
 class Profile(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: str = Field(pattern=r"^[a-z][a-z0-9_-]{0,63}$")
     name: str = Field(min_length=1)
     version: int = Field(ge=1)
     fields: dict[str, FieldRule] = Field(min_length=1, max_length=50)
+    tables: dict[str, TableRule] = Field(default_factory=dict, max_length=20)
 
     @model_validator(mode="after")
     def unique_aliases(self):
@@ -79,6 +126,9 @@ class Profile(BaseModel):
                 if alias.casefold() in seen:
                     raise ValueError(f"duplicate alias: {alias}")
                 seen.add(alias.casefold())
+        for table_name in self.tables:
+            if not re.fullmatch(r"[a-z][a-z0-9_]{0,63}", table_name):
+                raise ValueError("table names must be lower-case identifiers")
         return self
 
 

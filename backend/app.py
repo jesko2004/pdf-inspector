@@ -3,17 +3,19 @@
 from __future__ import annotations
 
 from contextlib import asynccontextmanager
+from functools import partial
 from typing import Annotated
 
 try:
     from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-    from fastapi.responses import FileResponse
+    from fastapi.responses import FileResponse, Response
 except ImportError as exc:
     raise RuntimeError(
         "backend dependencies are missing; install with `pip install -e '.[backend]'`"
     ) from exc
 
 from .config import Settings
+from .ocr import create_ocr_provider
 from .processor import process_document
 from .profile_store import (
     BuiltinProfileError,
@@ -23,6 +25,7 @@ from .profile_store import (
 from .profiles import Profile
 from .service import Processor, ResultNotReadyError, TaskService, UploadValidationError
 from .task_store import InvalidTaskStateError, TaskNotFoundError
+from .table_data import table_to_csv
 
 
 def create_app(
@@ -32,9 +35,12 @@ def create_app(
     start_workers: bool = True,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
+    configured_processor = processor or partial(
+        process_document, ocr_provider=create_ocr_provider(settings)
+    )
     service = TaskService(
         settings,
-        processor=processor or process_document,
+        processor=configured_processor,
         start_workers=start_workers,
     )
 
@@ -138,6 +144,53 @@ def create_app(
                 status_code=409,
                 detail={"code": "result_not_ready", "status": str(exc)},
             ) from exc
+
+    @app.get("/v1/tasks/{task_id}/tables")
+    def get_tables(task_id: str) -> dict:
+        try:
+            return service.get_result(task_id).get(
+                "tables", {"status": "ready", "items": [], "issues": []}
+            )
+        except TaskNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="task_not_found") from exc
+        except ResultNotReadyError as exc:
+            raise HTTPException(status_code=409, detail="result_not_ready") from exc
+
+    @app.get("/v1/tasks/{task_id}/tables/{table_id}.csv")
+    def download_table(task_id: str, table_id: str):
+        try:
+            result = service.get_result(task_id)
+        except TaskNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="task_not_found") from exc
+        except ResultNotReadyError as exc:
+            raise HTTPException(status_code=409, detail="result_not_ready") from exc
+        table = next(
+            (
+                item
+                for item in result.get("tables", {}).get("items", [])
+                if item["id"] == table_id
+            ),
+            None,
+        )
+        if table is None:
+            raise HTTPException(status_code=404, detail="table_not_found")
+        return Response(
+            content="\ufeff" + table_to_csv(table),
+            media_type="text/csv; charset=utf-8",
+            headers={
+                "Content-Disposition": f'attachment; filename="{table_id}.csv"'
+            },
+        )
+
+    @app.get("/v1/tasks/{task_id}/chunks")
+    def get_chunks(task_id: str) -> dict:
+        try:
+            result = service.get_result(task_id)
+            return {"items": result.get("chunks", [])}
+        except TaskNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="task_not_found") from exc
+        except ResultNotReadyError as exc:
+            raise HTTPException(status_code=409, detail="result_not_ready") from exc
 
     @app.post("/v1/tasks/{task_id}/retry", status_code=202)
     def retry_task(task_id: str) -> dict:

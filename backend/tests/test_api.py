@@ -27,6 +27,18 @@ def processor(_pdf_path, profile):
         },
         "issues": [{"field": "quote_date", "reason": "required_field_missing"}],
         "document": {"page_count": 1, "pages_needing_ocr": []},
+        "tables": {
+            "status": "ready",
+            "issues": [],
+            "items": [
+                {
+                    "id": "line_items_1",
+                    "columns": ["item", "amount"],
+                    "rows": [{"item": "服务器", "amount": "100"}],
+                }
+            ],
+        },
+        "chunks": [{"id": "chunk-1", "page_start": 1, "text": "测试供应商"}],
         "markdown": "<!-- Page 1 -->\n供应商：API 测试供应商",
     }
 
@@ -73,6 +85,16 @@ class ApiTests(unittest.TestCase):
             f"/v1/tasks/{task['id']}/result", params={"download": "true"}
         )
         self.assertIn("attachment", download.headers["content-disposition"])
+
+        tables = self.client.get(f"/v1/tasks/{task['id']}/tables")
+        self.assertEqual("line_items_1", tables.json()["items"][0]["id"])
+        csv_response = self.client.get(
+            f"/v1/tasks/{task['id']}/tables/line_items_1.csv"
+        )
+        self.assertEqual(200, csv_response.status_code)
+        self.assertIn("服务器,100", csv_response.text)
+        chunks = self.client.get(f"/v1/tasks/{task['id']}/chunks")
+        self.assertEqual("chunk-1", chunks.json()["items"][0]["id"])
 
     def test_profiles_and_upload_errors(self):
         profiles = self.client.get("/v1/profiles")
