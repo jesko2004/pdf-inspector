@@ -1276,9 +1276,11 @@ fn decode_cids_with_fallback(
     bytes: &[u8],
 ) -> String {
     bytes
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .filter_map(|chunk| {
-            let cid = u16::from_be_bytes([chunk[0], chunk[1]]);
+            let cid = u16::from_be_bytes(*chunk);
             primary
                 .lookup(cid)
                 .filter(|text| !text.is_empty() && !text.contains('\u{FFFD}'))
