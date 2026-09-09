@@ -1,0 +1,29 @@
+{
+  "top_k": 5,
+  "min_score": 0.25,
+  "document_ids": [],
+  "kinds": ["text", "table"],
+  "section_path_prefix": [],
+  "cases": [
+    {
+      "id": "installation-requirements",
+      "query": "What must be checked before installing the controller?",
+      "expected_sources": [
+        {
+          "document_id": "replace-with-document-id",
+          "pages": [3, 4]
+        }
+      ]
+    },
+    {
+      "id": "warranty-period",
+      "query": "How long is the warranty period?",
+      "expected_sources": [
+        {
+          "document_id": "replace-with-document-id",
+          "pages": []
+        }
+      ]
+    }
+  ]
+}

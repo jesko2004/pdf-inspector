@@ -47,7 +47,13 @@ class RecordingEmbeddingFactory:
                     factory.fail_marker in text for text in texts
                 ):
                     raise RuntimeError("planned embedding failure")
-                return [[1.0 / dimensions] * dimensions for _ in texts]
+                vectors = []
+                for text in texts:
+                    vector = [0.0] * dimensions
+                    digest = hashlib.sha256(text.encode("utf-8")).digest()
+                    vector[int.from_bytes(digest[:4], "big") % dimensions] = 1.0
+                    vectors.append(vector)
+                return vectors
 
         return Provider()
 
@@ -350,6 +356,18 @@ class KnowledgeServiceTests(unittest.TestCase):
         )
         self.assertEqual(2, result["batches_queued"])
         self.assertEqual(2, self.vectors.count(document_id=document["id"]))
+        during_reindex = self.service.search(
+            knowledge_base["id"],
+            chunk("one")["text"],
+            top_k=5,
+            min_score=-1,
+            document_ids=[],
+            page_start=None,
+            page_end=None,
+            kinds=[],
+            section_path_prefix=[],
+        )
+        self.assertEqual([], during_reindex["items"])
         self.service.run_pending(document["id"])
         chunks = self.store.list_chunks(document["id"])
         self.assertTrue(all(item["embedding_model"] == "hash-v2" for item in chunks))
@@ -385,6 +403,77 @@ class KnowledgeServiceTests(unittest.TestCase):
         final_batch = self.store.list_batches(document["id"])[0]
         self.assertEqual("completed", final_batch["status"])
         self.assertEqual(2, final_batch["attempts"])
+
+    def test_search_filters_citations_and_retrieval_evaluation(self):
+        knowledge_base = self.create_knowledge_base()
+        alpha = chunk("search-alpha", 2, ["Guide", "Install"])
+        beta = chunk("search-beta", 8, ["Guide", "Repair"])
+        self.add_task(
+            "task-search",
+            "search-manual.pdf",
+            b"%PDF-search",
+            [alpha, beta],
+        )
+        document = self.service.ingest_task(
+            knowledge_base["id"], "task-search", "search-manual"
+        )
+        self.service.run_pending(document["id"])
+
+        result = self.service.search(
+            knowledge_base["id"],
+            alpha["text"],
+            top_k=5,
+            min_score=0.9,
+            document_ids=[document["id"]],
+            page_start=2,
+            page_end=2,
+            kinds=["text"],
+            section_path_prefix=["Guide", "Install"],
+        )
+        self.assertEqual(1, result["returned"])
+        self.assertEqual(alpha["text"], result["items"][0]["content"])
+        self.assertEqual("search-manual.pdf", result["items"][0]["filename"])
+        self.assertEqual([2], result["items"][0]["citation"]["pages"])
+        self.assertGreaterEqual(result["latency_ms"], 0)
+
+        filtered_out = self.service.search(
+            knowledge_base["id"],
+            alpha["text"],
+            top_k=5,
+            min_score=0.9,
+            document_ids=[],
+            page_start=8,
+            page_end=8,
+            kinds=[],
+            section_path_prefix=[],
+        )
+        self.assertEqual([], filtered_out["items"])
+
+        evaluation = self.service.evaluate_retrieval(
+            knowledge_base["id"],
+            [
+                {
+                    "id": "install-question",
+                    "query": alpha["text"],
+                    "expected_sources": [{"document_id": document["id"], "pages": [2]}],
+                },
+                {
+                    "id": "repair-question",
+                    "query": beta["text"],
+                    "expected_sources": [{"document_id": document["id"], "pages": [8]}],
+                },
+            ],
+            top_k=1,
+            min_score=0.9,
+            document_ids=[],
+            page_start=None,
+            page_end=None,
+            kinds=[],
+            section_path_prefix=[],
+        )
+        self.assertEqual(1.0, evaluation["mean_recall_at_k"])
+        self.assertEqual(1.0, evaluation["mrr"])
+        self.assertGreaterEqual(evaluation["p95_latency_ms"], 0)
 
 
 if __name__ == "__main__":

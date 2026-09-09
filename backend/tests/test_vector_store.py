@@ -5,7 +5,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from backend.vector_store import PgVectorStore, SQLiteVectorStore, VectorRecord
+from backend.vector_store import (
+    PgVectorStore,
+    SQLiteVectorStore,
+    VectorRecord,
+    VectorSearchQuery,
+)
 
 
 def record(chunk_id, document_id="doc-1"):
@@ -46,6 +51,76 @@ class VectorStoreTests(unittest.TestCase):
             store.delete_knowledge_base("kb-1")
             self.assertEqual(0, store.count())
 
+    def test_sqlite_similarity_search_ranking_and_metadata_filters(self):
+        with TemporaryDirectory() as temporary:
+            store = SQLiteVectorStore(Path(temporary) / "vectors.sqlite3")
+            first = record("first", "doc-1")
+            first = VectorRecord(
+                **{
+                    **first.__dict__,
+                    "embedding": [1.0, 0.0, 0.0],
+                    "page_start": 2,
+                    "page_end": 2,
+                    "section_path": ["Guide", "Install"],
+                    "metadata": {"pages": [2]},
+                }
+            )
+            second = record("second", "doc-2")
+            second = VectorRecord(
+                **{
+                    **second.__dict__,
+                    "embedding": [0.0, 1.0, 0.0],
+                    "page_start": 8,
+                    "page_end": 8,
+                    "section_path": ["Guide", "Repair"],
+                    "metadata": {"pages": [8]},
+                }
+            )
+            store.upsert([first, second])
+
+            ranked = store.search(
+                VectorSearchQuery(
+                    knowledge_base_id="kb-1",
+                    embedding=[1.0, 0.0, 0.0],
+                    embedding_provider="hash",
+                    embedding_model="hash-v1",
+                    top_k=2,
+                    min_score=-1,
+                )
+            )
+            self.assertEqual(["first", "second"], [hit.chunk_id for hit in ranked])
+
+            hits = store.search(
+                VectorSearchQuery(
+                    knowledge_base_id="kb-1",
+                    embedding=[1.0, 0.0, 0.0],
+                    embedding_provider="hash",
+                    embedding_model="hash-v1",
+                    top_k=5,
+                    min_score=0.5,
+                    document_ids=("doc-1",),
+                    page_start=2,
+                    page_end=2,
+                    kinds=("text",),
+                    section_path_prefix=("Guide", "Install"),
+                )
+            )
+            self.assertEqual(["first"], [hit.chunk_id for hit in hits])
+            self.assertEqual(1.0, hits[0].score)
+
+            no_hits = store.search(
+                VectorSearchQuery(
+                    knowledge_base_id="kb-1",
+                    embedding=[1.0, 0.0, 0.0],
+                    embedding_provider="hash",
+                    embedding_model="hash-v1",
+                    top_k=5,
+                    min_score=0.5,
+                    section_path_prefix=("Guide", "Repair"),
+                )
+            )
+            self.assertEqual([], no_hits)
+
     def test_pgvector_uses_extension_vector_column_and_transactional_upsert(self):
         calls = []
 
@@ -53,6 +128,10 @@ class VectorStoreTests(unittest.TestCase):
             @staticmethod
             def fetchone():
                 return (0,)
+
+            @staticmethod
+            def fetchall():
+                return []
 
         class Connection:
             def __enter__(self):
@@ -93,6 +172,20 @@ class VectorStoreTests(unittest.TestCase):
             store = PgVectorStore("postgresql://example")
             store.upsert([record("pg-one")])
             store.delete_document("doc-1")
+            store.search(
+                VectorSearchQuery(
+                    knowledge_base_id="kb-1",
+                    embedding=[0.1, 0.2, 0.3],
+                    embedding_provider="hash",
+                    embedding_model="hash-v1",
+                    top_k=3,
+                    document_ids=("doc-1",),
+                    page_start=1,
+                    page_end=4,
+                    kinds=("text",),
+                    section_path_prefix=("Section",),
+                )
+            )
 
         statements = [
             item[1] for item in calls if item[0] in {"execute", "executemany"}
@@ -107,6 +200,8 @@ class VectorStoreTests(unittest.TestCase):
         self.assertTrue(
             any("DELETE FROM pdf_inspector_vectors" in sql for sql in statements)
         )
+        self.assertTrue(any("embedding <=> %s" in sql for sql in statements))
+        self.assertTrue(any("section_path ->> 0 = %s" in sql for sql in statements))
 
 
 if __name__ == "__main__":
