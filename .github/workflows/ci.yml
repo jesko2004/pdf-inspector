@@ -10,6 +10,50 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: pdf_inspector
+          POSTGRES_PASSWORD: pdf_inspector
+          POSTGRES_DB: pdf_inspector_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U pdf_inspector -d pdf_inspector_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      PDF_INSPECTOR_TEST_PGVECTOR_DSN: postgresql://pdf_inspector:pdf_inspector@127.0.0.1:5432/pdf_inspector_test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: backend
+
+      - name: Install backend with optional integrations
+        run: |
+          python -m pip install maturin
+          python -m pip install -e ".[backend,ocr,pgvector]"
+
+      - name: Run backend tests
+        run: python -m unittest discover -s backend/tests -v
+
   test:
     name: Test
     runs-on: ubuntu-latest

@@ -127,6 +127,74 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(404, missing_profile.status_code)
 
+    def test_knowledge_base_ingestion_reindex_and_deletion_workflow(self):
+        task_response = self.client.post(
+            "/v1/tasks",
+            data={"profile_id": "purchase_quote"},
+            files={"file": ("manual.pdf", b"%PDF-1.7\nmanual", "application/pdf")},
+        )
+        task = task_response.json()
+        self.app.state.service.run_pending(task["id"])
+
+        created = self.client.post(
+            "/v1/knowledge-bases",
+            json={"name": "产品手册", "description": "内部产品资料"},
+        )
+        self.assertEqual(201, created.status_code)
+        knowledge_base = created.json()
+        self.assertEqual("hash", knowledge_base["embedding_provider"])
+
+        ingested = self.client.post(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/documents",
+            json={"task_id": task["id"]},
+        )
+        self.assertEqual(202, ingested.status_code)
+        document = ingested.json()
+        self.app.state.knowledge.run_pending(document["id"])
+
+        status = self.client.get(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/documents/{document['id']}"
+        )
+        self.assertEqual("ready", status.json()["status"])
+        self.assertEqual(100, status.json()["progress"])
+        chunks = self.client.get(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/documents/"
+            f"{document['id']}/chunks"
+        )
+        self.assertEqual("indexed", chunks.json()["items"][0]["status"])
+        batches = self.client.get(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/documents/"
+            f"{document['id']}/batches"
+        )
+        self.assertEqual("completed", batches.json()["items"][0]["status"])
+
+        updated = self.client.patch(
+            f"/v1/knowledge-bases/{knowledge_base['id']}",
+            json={"description": "已更新的内部资料"},
+        )
+        self.assertEqual("已更新的内部资料", updated.json()["description"])
+        reindexed = self.client.post(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/reindex",
+            json={"embedding_model": "hash-v2"},
+        )
+        self.assertEqual(202, reindexed.status_code)
+        self.app.state.knowledge.run_pending(document["id"])
+        self.assertEqual(
+            "ready",
+            self.client.get(
+                f"/v1/knowledge-bases/{knowledge_base['id']}/documents/{document['id']}"
+            ).json()["status"],
+        )
+
+        deleted_document = self.client.delete(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/documents/{document['id']}"
+        )
+        self.assertEqual(204, deleted_document.status_code)
+        deleted_knowledge_base = self.client.delete(
+            f"/v1/knowledge-bases/{knowledge_base['id']}"
+        )
+        self.assertEqual(204, deleted_knowledge_base.status_code)
+
 
 if __name__ == "__main__":
     unittest.main()

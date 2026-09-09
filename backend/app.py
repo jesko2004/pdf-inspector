@@ -15,6 +15,21 @@ except ImportError as exc:
     ) from exc
 
 from .config import Settings
+from .embeddings import EmbeddingError
+from .knowledge_models import (
+    KnowledgeBaseCreate,
+    KnowledgeBaseReindex,
+    KnowledgeBaseUpdate,
+    KnowledgeDocumentIngest,
+)
+from .knowledge_service import EmbeddingFactory, KnowledgeService
+from .knowledge_store import (
+    InvalidKnowledgeStateError,
+    KnowledgeBaseNotFoundError,
+    KnowledgeConflictError,
+    KnowledgeDocumentNotFoundError,
+    KnowledgeStore,
+)
 from .ocr import create_ocr_provider
 from .processor import process_document
 from .profile_store import (
@@ -24,14 +39,17 @@ from .profile_store import (
 )
 from .profiles import Profile
 from .service import Processor, ResultNotReadyError, TaskService, UploadValidationError
-from .task_store import InvalidTaskStateError, TaskNotFoundError
 from .table_data import table_to_csv
+from .task_store import InvalidTaskStateError, TaskNotFoundError
+from .vector_store import VectorStore, create_vector_store
 
 
 def create_app(
     settings: Settings | None = None,
     *,
     processor: Processor | None = None,
+    embedding_factory: EmbeddingFactory | None = None,
+    vector_store: VectorStore | None = None,
     start_workers: bool = True,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
@@ -43,10 +61,19 @@ def create_app(
         processor=configured_processor,
         start_workers=start_workers,
     )
+    knowledge = KnowledgeService(
+        settings,
+        service,
+        KnowledgeStore(settings.knowledge_database_path),
+        vector_store or create_vector_store(settings),
+        embedding_factory=embedding_factory,
+        start_workers=start_workers,
+    )
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
         yield
+        knowledge.close()
         service.close()
 
     app = FastAPI(
@@ -56,6 +83,7 @@ def create_app(
         lifespan=lifespan,
     )
     app.state.service = service
+    app.state.knowledge = knowledge
 
     @app.get("/health")
     def health() -> dict:
@@ -64,6 +92,209 @@ def create_app(
     @app.get("/v1/profiles")
     def list_profiles() -> dict:
         return {"items": service.profiles.list()}
+
+    @app.post("/v1/knowledge-bases", status_code=201)
+    def create_knowledge_base(payload: KnowledgeBaseCreate) -> dict:
+        try:
+            return knowledge.create_knowledge_base(
+                name=payload.name,
+                description=payload.description,
+                embedding_provider=payload.embedding_provider,
+                embedding_model=payload.embedding_model,
+                embedding_dimensions=payload.embedding_dimensions,
+            )
+        except KnowledgeConflictError as exc:
+            raise HTTPException(
+                status_code=409, detail="knowledge_base_already_exists"
+            ) from exc
+        except (ValueError, EmbeddingError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/v1/knowledge-bases")
+    def list_knowledge_bases(
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict:
+        return {
+            "items": knowledge.store.list_knowledge_bases(limit, offset),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}")
+    def get_knowledge_base(knowledge_base_id: str) -> dict:
+        try:
+            return knowledge.store.get_knowledge_base(knowledge_base_id)
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+
+    @app.patch("/v1/knowledge-bases/{knowledge_base_id}")
+    def update_knowledge_base(
+        knowledge_base_id: str, payload: KnowledgeBaseUpdate
+    ) -> dict:
+        try:
+            current = knowledge.store.get_knowledge_base(knowledge_base_id)
+            return knowledge.store.update_knowledge_base(
+                knowledge_base_id,
+                name=payload.name if payload.name is not None else current["name"],
+                description=(
+                    payload.description
+                    if payload.description is not None
+                    else current["description"]
+                ),
+            )
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+        except KnowledgeConflictError as exc:
+            raise HTTPException(
+                status_code=409, detail="knowledge_base_already_exists"
+            ) from exc
+
+    @app.delete("/v1/knowledge-bases/{knowledge_base_id}", status_code=204)
+    def delete_knowledge_base(knowledge_base_id: str) -> Response:
+        try:
+            knowledge.delete_knowledge_base(knowledge_base_id)
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+        except InvalidKnowledgeStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(status_code=204)
+
+    @app.post("/v1/knowledge-bases/{knowledge_base_id}/documents", status_code=202)
+    def ingest_knowledge_document(
+        knowledge_base_id: str, payload: KnowledgeDocumentIngest
+    ) -> dict:
+        try:
+            return knowledge.ingest_task(
+                knowledge_base_id, payload.task_id, payload.document_key
+            )
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+        except TaskNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="task_not_found") from exc
+        except ResultNotReadyError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": "task_result_not_ready", "status": str(exc)},
+            ) from exc
+        except InvalidKnowledgeStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/documents")
+    def list_knowledge_documents(
+        knowledge_base_id: str,
+        limit: Annotated[int, Query(ge=1, le=200)] = 50,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict:
+        try:
+            return {
+                "items": knowledge.store.list_documents(
+                    knowledge_base_id, limit, offset
+                ),
+                "limit": limit,
+                "offset": offset,
+            }
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/documents/{document_id}")
+    def get_knowledge_document(knowledge_base_id: str, document_id: str) -> dict:
+        try:
+            return knowledge.get_document(knowledge_base_id, document_id)
+        except KnowledgeDocumentNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_document_not_found"
+            ) from exc
+
+    @app.delete(
+        "/v1/knowledge-bases/{knowledge_base_id}/documents/{document_id}",
+        status_code=204,
+    )
+    def delete_knowledge_document(knowledge_base_id: str, document_id: str) -> Response:
+        try:
+            knowledge.delete_document(knowledge_base_id, document_id)
+        except KnowledgeDocumentNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_document_not_found"
+            ) from exc
+        except InvalidKnowledgeStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        return Response(status_code=204)
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/documents/{document_id}/chunks")
+    def list_knowledge_chunks(
+        knowledge_base_id: str,
+        document_id: str,
+        limit: Annotated[int, Query(ge=1, le=500)] = 200,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict:
+        try:
+            knowledge.get_document(knowledge_base_id, document_id)
+            return {
+                "items": knowledge.store.list_chunks(document_id, limit, offset),
+                "limit": limit,
+                "offset": offset,
+            }
+        except KnowledgeDocumentNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_document_not_found"
+            ) from exc
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/documents/{document_id}/batches")
+    def list_embedding_batches(knowledge_base_id: str, document_id: str) -> dict:
+        try:
+            knowledge.get_document(knowledge_base_id, document_id)
+            return {"items": knowledge.store.list_batches(document_id)}
+        except KnowledgeDocumentNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_document_not_found"
+            ) from exc
+
+    @app.post(
+        "/v1/knowledge-bases/{knowledge_base_id}/documents/{document_id}/retry",
+        status_code=202,
+    )
+    def retry_embedding_batches(knowledge_base_id: str, document_id: str) -> dict:
+        try:
+            return knowledge.retry_document(knowledge_base_id, document_id)
+        except KnowledgeDocumentNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_document_not_found"
+            ) from exc
+        except InvalidKnowledgeStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+
+    @app.post("/v1/knowledge-bases/{knowledge_base_id}/reindex", status_code=202)
+    def reindex_knowledge_base(
+        knowledge_base_id: str, payload: KnowledgeBaseReindex
+    ) -> dict:
+        try:
+            return knowledge.reindex_knowledge_base(
+                knowledge_base_id,
+                embedding_provider=payload.embedding_provider,
+                embedding_model=payload.embedding_model,
+                embedding_dimensions=payload.embedding_dimensions,
+            )
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+        except InvalidKnowledgeStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except (ValueError, EmbeddingError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     @app.get("/v1/profiles/{profile_id}")
     def get_profile(profile_id: str) -> dict:
@@ -177,9 +408,7 @@ def create_app(
         return Response(
             content="\ufeff" + table_to_csv(table),
             media_type="text/csv; charset=utf-8",
-            headers={
-                "Content-Disposition": f'attachment; filename="{table_id}.csv"'
-            },
+            headers={"Content-Disposition": f'attachment; filename="{table_id}.csv"'},
         )
 
     @app.get("/v1/tasks/{task_id}/chunks")

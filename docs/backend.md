@@ -35,6 +35,15 @@ Environment variables:
 | `PDF_INSPECTOR_OCR_TIMEOUT_SECONDS` | `180` | Per-document OCR timeout |
 | `PDF_INSPECTOR_OCR_DPI` | `200` | PDF render resolution for built-in RapidOCR (72-600) |
 | `PDF_INSPECTOR_OCR_MIN_CONFIDENCE` | `0.5` | Minimum RapidOCR line confidence (0-1) |
+| `PDF_INSPECTOR_VECTOR_STORE` | `sqlite` | `sqlite` for local use or `pgvector` for production |
+| `PDF_INSPECTOR_PGVECTOR_DSN` | unset | PostgreSQL connection string; required for `pgvector` |
+| `PDF_INSPECTOR_EMBEDDING_PROVIDER` | `hash` | Built-in `hash` or `openai_compatible` |
+| `PDF_INSPECTOR_EMBEDDING_MODEL` | `hash-v1` | Model identifier stored with every index |
+| `PDF_INSPECTOR_EMBEDDING_DIMENSIONS` | `256` | Expected vector dimensions (8-4096) |
+| `PDF_INSPECTOR_EMBEDDING_BATCH_SIZE` | `32` | Chunks per independently retryable batch (1-256) |
+| `PDF_INSPECTOR_EMBEDDING_BASE_URL` | unset | OpenAI-compatible API base URL, normally ending in `/v1` |
+| `PDF_INSPECTOR_EMBEDDING_API_KEY` | unset | Optional bearer token; never written to the database |
+| `PDF_INSPECTOR_EMBEDDING_TIMEOUT_SECONDS` | `60` | Timeout for one embedding HTTP batch |
 
 For multi-host deployment, replace the in-process executor and local files with a shared queue/object store. A single service process is durable across restarts: SQLite retains tasks and interrupted `processing` tasks are queued again on startup.
 
@@ -209,6 +218,107 @@ The endpoint also returns a `quality` object with candidate/emitted counts, reje
 
 Recommended vector-store metadata fields are `id`, `page_start`, `page_end`, `section_path`, `kind`, and `content_hash`. The stable ID/hash pair supports idempotent upsert and incremental re-indexing when documents change.
 
+## Built-in knowledge bases
+
+The knowledge layer persists this relationship:
+
+```text
+KnowledgeBase
+└── Document (source task, file hash, chunk-set hash, status, progress)
+    ├── Chunk (text, Markdown, pages, section path, content hash, index status)
+    └── EmbeddingBatch (chunk IDs, attempts, status, last error)
+```
+
+Knowledge metadata and batch progress always use `.pdf-inspector-data/knowledge.sqlite3`. The default SQLite vector backend stores JSON vectors in the same file so development and tests work without external infrastructure. Use PostgreSQL + pgvector for production vector storage:
+
+```bash
+pip install -e ".[backend,pgvector]"
+```
+
+Enable pgvector in the target database and configure the service:
+
+```sql
+CREATE EXTENSION IF NOT EXISTS vector;
+```
+
+```powershell
+$env:PDF_INSPECTOR_VECTOR_STORE='pgvector'
+$env:PDF_INSPECTOR_PGVECTOR_DSN='postgresql://pdf_user:password@localhost:5432/pdf_inspector'
+pdf-inspector-api
+```
+
+The service creates `pdf_inspector_vectors`, stores vectors with their knowledge-base/document/chunk IDs and source metadata, and performs transactional upserts. The column uses unbounded `vector` so different knowledge bases may use different dimensions. A later retrieval deployment can add dimension-specific partial HNSW indexes when its production model dimensions are fixed.
+
+### Embedding providers
+
+The built-in `hash` provider is deterministic, local, dependency-free, and intended for development, lifecycle testing, and offline demos. For semantic retrieval, use an OpenAI-compatible embedding endpoint:
+
+```powershell
+$env:PDF_INSPECTOR_EMBEDDING_PROVIDER='openai_compatible'
+$env:PDF_INSPECTOR_EMBEDDING_BASE_URL='https://api.example.com/v1'
+$env:PDF_INSPECTOR_EMBEDDING_API_KEY='replace-me'
+$env:PDF_INSPECTOR_EMBEDDING_MODEL='text-embedding-model'
+$env:PDF_INSPECTOR_EMBEDDING_DIMENSIONS='1536'
+```
+
+The provider sends batched `POST /embeddings` requests with `model`, `input`, `encoding_format: float`, and `dimensions`. It validates response indexes, count, dimensions, and finite numeric values before writing any vector.
+
+### Create and manage a knowledge base
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/knowledge-bases \
+  -H "Content-Type: application/json" \
+  -d '{"name":"Product manuals","description":"Internal product documentation"}'
+
+curl http://127.0.0.1:8000/v1/knowledge-bases
+curl -X PATCH http://127.0.0.1:8000/v1/knowledge-bases/KB_ID \
+  -H "Content-Type: application/json" \
+  -d '{"description":"Updated documentation"}'
+```
+
+Deleting a knowledge base cascades through its documents, chunks, batches, and vectors. It does not delete source PDF tasks, uploads, or extraction results. Deletion is rejected while indexing is active.
+
+### Ingest a completed PDF task
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/documents \
+  -H "Content-Type: application/json" \
+  -d '{"task_id":"TASK_ID","document_key":"product-manual"}'
+```
+
+`document_key` identifies a logical document across revisions and defaults to the uploaded filename. A task must already be `ready` or `needs_review`. Its quality-filtered chunks are copied into the knowledge base and split into independently persisted embedding batches.
+
+Poll the document and inspect chunks or batches:
+
+```bash
+curl http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/documents/DOCUMENT_ID
+curl http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/documents/DOCUMENT_ID/chunks
+curl http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/documents/DOCUMENT_ID/batches
+```
+
+Document statuses are `queued`, `indexing`, `ready`, `partial`, and `failed`. When one batch fails, later batches continue. `partial` means some chunks are indexed and some failed; retrying queues only failed batches:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/documents/DOCUMENT_ID/retry
+```
+
+### Idempotency, incremental updates, and reindexing
+
+- A unique PDF file hash prevents the same file from being inserted twice into one knowledge base, even under different document keys.
+- A chunk-set hash detects changes caused by a newer preprocessing pipeline even when the source PDF is unchanged.
+- Revisions submitted with the same `document_key` compare chunk kind, section, pages, and content hash. Unchanged indexed chunks keep their vectors; new or changed chunks are embedded; removed vectors are deleted through a durable cleanup queue.
+- Batch attempts and errors survive restarts. Interrupted `processing` batches are returned to `queued` during startup.
+
+Rebuild every document after changing the embedding provider, model, or dimensions:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/reindex \
+  -H "Content-Type: application/json" \
+  -d '{"embedding_provider":"openai_compatible","embedding_model":"new-model","embedding_dimensions":1536}'
+```
+
+Reindexing uses stable chunk IDs and overwrites each vector only after its replacement batch succeeds. A failed batch therefore remains observable and independently retryable rather than forcing the entire document to restart.
+
 ## API summary
 
 | Method | Path | Purpose |
@@ -226,3 +336,16 @@ Recommended vector-store metadata fields are `id`, `page_start`, `page_end`, `se
 | `GET` | `/v1/tasks/{id}/tables/{table_id}.csv` | Download one table as CSV |
 | `GET` | `/v1/tasks/{id}/chunks` | Read RAG-ready chunks |
 | `POST` | `/v1/tasks/{id}/retry` | Retry a failed task |
+| `POST` | `/v1/knowledge-bases` | Create a knowledge base |
+| `GET` | `/v1/knowledge-bases` | List knowledge bases |
+| `GET` | `/v1/knowledge-bases/{id}` | Read a knowledge base and counts |
+| `PATCH` | `/v1/knowledge-bases/{id}` | Update name or description |
+| `DELETE` | `/v1/knowledge-bases/{id}` | Delete a knowledge base and its index |
+| `POST` | `/v1/knowledge-bases/{id}/documents` | Ingest a completed PDF task |
+| `GET` | `/v1/knowledge-bases/{id}/documents` | List indexed documents |
+| `GET` | `/v1/knowledge-bases/{id}/documents/{document_id}` | Read status and progress |
+| `GET` | `/v1/knowledge-bases/{id}/documents/{document_id}/chunks` | Inspect stored chunks |
+| `GET` | `/v1/knowledge-bases/{id}/documents/{document_id}/batches` | Inspect embedding batches |
+| `POST` | `/v1/knowledge-bases/{id}/documents/{document_id}/retry` | Retry failed batches only |
+| `DELETE` | `/v1/knowledge-bases/{id}/documents/{document_id}` | Delete document chunks and vectors |
+| `POST` | `/v1/knowledge-bases/{id}/reindex` | Rebuild vectors with a new model |
