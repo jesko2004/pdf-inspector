@@ -13,6 +13,12 @@ pip install -e ".[backend]"
 pdf-inspector-api
 ```
 
+To run OCR locally, install the additional models and inference runtime:
+
+```bash
+pip install -e ".[backend,ocr]"
+```
+
 The service listens on `127.0.0.1:8000`. OpenAPI documentation is available at `http://127.0.0.1:8000/docs`.
 
 Environment variables:
@@ -24,8 +30,11 @@ Environment variables:
 | `PDF_INSPECTOR_WORKERS` | `2` | In-process extraction workers |
 | `PDF_INSPECTOR_HOST` | `127.0.0.1` | Listen address |
 | `PDF_INSPECTOR_PORT` | `8000` | Listen port |
+| `PDF_INSPECTOR_OCR_PROVIDER` | `none` | `none`, built-in `rapidocr`, or external `command` |
 | `PDF_INSPECTOR_OCR_COMMAND_JSON` | unset | OCR adapter command as a JSON string array |
 | `PDF_INSPECTOR_OCR_TIMEOUT_SECONDS` | `180` | Per-document OCR timeout |
+| `PDF_INSPECTOR_OCR_DPI` | `200` | PDF render resolution for built-in RapidOCR (72-600) |
+| `PDF_INSPECTOR_OCR_MIN_CONFIDENCE` | `0.5` | Minimum RapidOCR line confidence (0-1) |
 
 For multi-host deployment, replace the in-process executor and local files with a shared queue/object store. A single service process is durable across restarts: SQLite retains tasks and interrupted `processing` tasks are queued again on startup.
 
@@ -154,9 +163,23 @@ curl -OJ http://127.0.0.1:8000/v1/tasks/TASK_ID/tables/line_items_1.csv
 
 The native detector supplies `pages_needing_ocr`. The task processor sends only those pages to a configured adapter and merges successful OCR output back into the original page order before field extraction, table normalization, and chunking.
 
+### Built-in local RapidOCR
+
+The built-in provider renders only the requested pages with PyMuPDF and recognizes Chinese/English text locally with RapidOCR and ONNX Runtime. No PDF or recognized text is sent to an external service. Lines below the configured confidence threshold are discarded, the remaining lines are restored to top-to-bottom order, and their mean confidence is recorded on the page.
+
+```powershell
+$env:PDF_INSPECTOR_OCR_PROVIDER='rapidocr'
+$env:PDF_INSPECTOR_OCR_DPI='200'
+$env:PDF_INSPECTOR_OCR_MIN_CONFIDENCE='0.5'
+pdf-inspector-api
+```
+
+### External command adapter
+
 Configure an adapter command as a JSON array. `{pdf}` is replaced with the uploaded PDF path and `{pages}` with a comma-separated 1-indexed page list:
 
 ```powershell
+$env:PDF_INSPECTOR_OCR_PROVIDER='command'
 $env:PDF_INSPECTOR_OCR_COMMAND_JSON='["python","ocr_adapter.py","--pdf","{pdf}","--pages","{pages}"]'
 ```
 
@@ -170,15 +193,19 @@ The command must write UTF-8 JSON to stdout:
 }
 ```
 
-This contract can wrap PaddleOCR, RapidOCR, a GPU OCR service, or a cloud OCR SDK without coupling the task service to one vendor. Missing or failed pages remain in `document.pages_needing_ocr` and cause `needs_review`; successful pages record `extraction_method: "ocr"` and confidence.
+This contract can wrap PaddleOCR, a GPU OCR service, or a cloud OCR SDK without coupling the task service to one vendor. For backward compatibility, setting the command without `PDF_INSPECTOR_OCR_PROVIDER` still selects the command provider. Missing or failed pages remain in `document.pages_needing_ocr` and cause `needs_review`; successful pages record `extraction_method: "ocr"` and confidence.
 
 ## Knowledge-base preprocessing
 
 Every result contains a `chunks` array suitable for embedding or direct ingestion by LangChain/LlamaIndex. Chunking tracks Markdown headings across pages and emits deterministic IDs, content hashes, page citations, `section_path`, `kind`, and both Markdown/plain text. Tables stay atomic; oversized tables split only between rows and repeat their header.
 
+Before chunks are returned, recurring first/last-page lines (including changing page numbers) are removed, punctuation-only and very short text chunks are rejected, and normalized exact duplicates inside the same section are collapsed. Duplicate chunks retain the combined `pages`, `page_start`, `page_end`, and `source_occurrences`, so deduplication does not lose source citations. Tables are exempt from the minimum-length rule.
+
 ```bash
 curl http://127.0.0.1:8000/v1/tasks/TASK_ID/chunks
 ```
+
+The endpoint also returns a `quality` object with candidate/emitted counts, rejection reasons, duplicate counts, and removed margin lines. The same report is stored as `chunk_quality` in the complete task result, making ingestion quality observable.
 
 Recommended vector-store metadata fields are `id`, `page_start`, `page_end`, `section_path`, `kind`, and `content_hash`. The stable ID/hash pair supports idempotent upsert and incremental re-indexing when documents change.
 

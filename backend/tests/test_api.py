@@ -95,6 +95,7 @@ class ApiTests(unittest.TestCase):
         self.assertIn("服务器,100", csv_response.text)
         chunks = self.client.get(f"/v1/tasks/{task['id']}/chunks")
         self.assertEqual("chunk-1", chunks.json()["items"][0]["id"])
+        self.assertEqual({}, chunks.json()["quality"])
 
     def test_profiles_and_upload_errors(self):
         profiles = self.client.get("/v1/profiles")
