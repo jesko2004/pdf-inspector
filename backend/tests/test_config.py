@@ -32,9 +32,35 @@ class ConfigTests(unittest.TestCase):
     def test_invalid_ocr_provider_is_rejected(self):
         with patch.dict(
             os.environ, {"PDF_INSPECTOR_OCR_PROVIDER": "unknown"}, clear=True
-        ):
-            with self.assertRaisesRegex(ValueError, "OCR_PROVIDER"):
-                Settings.from_env()
+        ), self.assertRaisesRegex(ValueError, "OCR_PROVIDER"):
+            Settings.from_env()
+
+    def test_pgvector_and_embedding_environment_options(self):
+        environment = {
+            "PDF_INSPECTOR_VECTOR_STORE": "pgvector",
+            "PDF_INSPECTOR_PGVECTOR_DSN": "postgresql://user:secret@db/example",
+            "PDF_INSPECTOR_EMBEDDING_PROVIDER": "openai_compatible",
+            "PDF_INSPECTOR_EMBEDDING_MODEL": "embed-v1",
+            "PDF_INSPECTOR_EMBEDDING_DIMENSIONS": "1536",
+            "PDF_INSPECTOR_EMBEDDING_BATCH_SIZE": "20",
+            "PDF_INSPECTOR_EMBEDDING_BASE_URL": "http://model:8000/v1",
+            "PDF_INSPECTOR_EMBEDDING_API_KEY": "private-key",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = Settings.from_env()
+
+        self.assertEqual("pgvector", settings.vector_store)
+        self.assertEqual("openai_compatible", settings.embedding_provider)
+        self.assertEqual(1536, settings.embedding_dimensions)
+        self.assertEqual(20, settings.embedding_batch_size)
+        self.assertNotIn("secret", repr(settings))
+        self.assertNotIn("private-key", repr(settings))
+
+    def test_pgvector_requires_a_dsn(self):
+        with patch.dict(
+            os.environ, {"PDF_INSPECTOR_VECTOR_STORE": "pgvector"}, clear=True
+        ), self.assertRaisesRegex(ValueError, "PGVECTOR_DSN"):
+            Settings.from_env()
 
 
 if __name__ == "__main__":
