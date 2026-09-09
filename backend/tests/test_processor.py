@@ -70,6 +70,7 @@ class ProcessorTests(unittest.TestCase):
         self.assertIn("<!-- Page 2 -->", result["markdown"])
         self.assertEqual([(2, [[0.0, 0.0, 200.0, 100.0]])], engine.page_regions)
         self.assertEqual([2], result["document"]["pages_with_tables"])
+        self.assertIn("emitted_chunks", result["chunk_quality"])
 
     def test_ocr_pages_force_review(self):
         engine = FakeEngine()

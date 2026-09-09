@@ -7,7 +7,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from .chunking import chunk_pages
+from .chunking import chunk_pages_with_report
 from .ocr import OcrProvider
 from .profiles import Profile, extract_fields
 from .table_data import extract_business_tables
@@ -116,7 +116,7 @@ def process_document(
     extraction = extract_fields(markdown, profile, scoped)
     page_markdown = [(page["page"], page["markdown"]) for page in pages]
     tables = extract_business_tables(page_markdown, profile)
-    chunks = chunk_pages(
+    chunks, chunk_quality = chunk_pages_with_report(
         page_markdown,
         document_id=_document_id(pdf_path),
     )
@@ -160,5 +160,6 @@ def process_document(
         },
         "tables": tables,
         "chunks": chunks,
+        "chunk_quality": chunk_quality,
         "markdown": markdown,
     }

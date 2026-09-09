@@ -186,7 +186,10 @@ def create_app(
     def get_chunks(task_id: str) -> dict:
         try:
             result = service.get_result(task_id)
-            return {"items": result.get("chunks", [])}
+            return {
+                "items": result.get("chunks", []),
+                "quality": result.get("chunk_quality", {}),
+            }
         except TaskNotFoundError as exc:
             raise HTTPException(status_code=404, detail="task_not_found") from exc
         except ResultNotReadyError as exc:
