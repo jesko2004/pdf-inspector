@@ -28,6 +28,14 @@ class Settings:
     embedding_base_url: str | None = None
     embedding_api_key: str | None = field(default=None, repr=False)
     embedding_timeout_seconds: float = 60
+    llm_provider: str = "extractive"
+    llm_model: str = "extractive-v1"
+    llm_base_url: str | None = None
+    llm_api_key: str | None = field(default=None, repr=False)
+    llm_timeout_seconds: float = 120
+    rag_max_context_tokens: int = 4000
+    rag_max_output_tokens: int = 800
+    rag_min_evidence_score: float = 0.2
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -68,6 +76,22 @@ class Settings:
         embedding_api_key = os.environ.get("PDF_INSPECTOR_EMBEDDING_API_KEY")
         embedding_timeout = float(
             os.environ.get("PDF_INSPECTOR_EMBEDDING_TIMEOUT_SECONDS", "60")
+        )
+        llm_provider = os.environ.get(
+            "PDF_INSPECTOR_LLM_PROVIDER", "extractive"
+        ).lower()
+        llm_model = os.environ.get("PDF_INSPECTOR_LLM_MODEL", "extractive-v1")
+        llm_base_url = os.environ.get("PDF_INSPECTOR_LLM_BASE_URL")
+        llm_api_key = os.environ.get("PDF_INSPECTOR_LLM_API_KEY")
+        llm_timeout = float(os.environ.get("PDF_INSPECTOR_LLM_TIMEOUT_SECONDS", "120"))
+        rag_max_context_tokens = int(
+            os.environ.get("PDF_INSPECTOR_RAG_MAX_CONTEXT_TOKENS", "4000")
+        )
+        rag_max_output_tokens = int(
+            os.environ.get("PDF_INSPECTOR_RAG_MAX_OUTPUT_TOKENS", "800")
+        )
+        rag_min_evidence_score = float(
+            os.environ.get("PDF_INSPECTOR_RAG_MIN_EVIDENCE_SCORE", "0.2")
         )
         ocr_command = None
         if ocr_command_raw:
@@ -126,6 +150,30 @@ class Settings:
             )
         if embedding_timeout <= 0:
             raise ValueError("PDF_INSPECTOR_EMBEDDING_TIMEOUT_SECONDS must be positive")
+        if llm_provider not in {"extractive", "openai_compatible"}:
+            raise ValueError(
+                "PDF_INSPECTOR_LLM_PROVIDER must be one of: extractive, openai_compatible"
+            )
+        if not llm_model.strip():
+            raise ValueError("PDF_INSPECTOR_LLM_MODEL must not be empty")
+        if llm_provider == "openai_compatible" and not llm_base_url:
+            raise ValueError(
+                "PDF_INSPECTOR_LLM_BASE_URL is required for openai_compatible"
+            )
+        if llm_timeout <= 0:
+            raise ValueError("PDF_INSPECTOR_LLM_TIMEOUT_SECONDS must be positive")
+        if not 128 <= rag_max_context_tokens <= 128000:
+            raise ValueError(
+                "PDF_INSPECTOR_RAG_MAX_CONTEXT_TOKENS must be between 128 and 128000"
+            )
+        if not 1 <= rag_max_output_tokens <= 16000:
+            raise ValueError(
+                "PDF_INSPECTOR_RAG_MAX_OUTPUT_TOKENS must be between 1 and 16000"
+            )
+        if not -1 <= rag_min_evidence_score <= 1:
+            raise ValueError(
+                "PDF_INSPECTOR_RAG_MIN_EVIDENCE_SCORE must be between -1 and 1"
+            )
         return cls(
             data_dir=data_dir,
             builtin_profile_dir=profile_dir,
@@ -145,6 +193,14 @@ class Settings:
             embedding_base_url=embedding_base_url,
             embedding_api_key=embedding_api_key,
             embedding_timeout_seconds=embedding_timeout,
+            llm_provider=llm_provider,
+            llm_model=llm_model,
+            llm_base_url=llm_base_url,
+            llm_api_key=llm_api_key,
+            llm_timeout_seconds=llm_timeout,
+            rag_max_context_tokens=rag_max_context_tokens,
+            rag_max_output_tokens=rag_max_output_tokens,
+            rag_min_evidence_score=rag_min_evidence_score,
         )
 
     @property

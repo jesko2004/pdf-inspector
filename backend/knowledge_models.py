@@ -199,3 +199,42 @@ class KnowledgeRetrievalEvaluationRequest(BaseModel):
         if len(case_ids) != len(set(case_ids)):
             raise ValueError("evaluation case IDs must be unique")
         return self
+
+
+class KnowledgeAskRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    question: str = Field(min_length=1, max_length=4000)
+    top_k: int = Field(default=6, ge=1, le=50)
+    min_score: float | None = Field(default=None, ge=-1.0, le=1.0)
+    document_ids: list[str] = Field(default_factory=list, max_length=100)
+    page_start: int | None = Field(default=None, ge=1)
+    page_end: int | None = Field(default=None, ge=1)
+    kinds: list[str] = Field(default_factory=list, max_length=20)
+    section_path_prefix: list[str] = Field(default_factory=list, max_length=20)
+    max_context_tokens: int | None = Field(default=None, ge=128, le=128000)
+    max_output_tokens: int | None = Field(default=None, ge=1, le=16000)
+    stream: bool = False
+
+    @field_validator("question")
+    @classmethod
+    def strip_question(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            raise ValueError("question must not be blank")
+        return stripped
+
+    @field_validator("document_ids", "kinds", "section_path_prefix")
+    @classmethod
+    def normalize_string_lists(cls, values: list[str]) -> list[str]:
+        return KnowledgeSearchRequest.normalize_string_lists(values)
+
+    @model_validator(mode="after")
+    def validate_page_range(self) -> KnowledgeAskRequest:
+        if (
+            self.page_start is not None
+            and self.page_end is not None
+            and self.page_start > self.page_end
+        ):
+            raise ValueError("page_start must not be greater than page_end")
+        return self

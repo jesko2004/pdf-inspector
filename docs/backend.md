@@ -354,6 +354,32 @@ The evaluator reports per-case Recall@K, reciprocal rank, first relevant rank, m
 
 LangChain is intentionally not required by the search core. A future optional adapter can expose this API as a LangChain Retriever without moving indexing, filtering, citation, or evaluation behavior out of the service.
 
+### Grounded RAG answers
+
+The answer layer uses the same provider boundary as the indexing layer. Its offline `extractive` provider returns source text directly for local development. Configure any OpenAI-compatible chat-completions endpoint, including a locally hosted compatible model, for generated answers:
+
+```powershell
+$env:PDF_INSPECTOR_LLM_PROVIDER='openai_compatible'
+$env:PDF_INSPECTOR_LLM_BASE_URL='http://localhost:8000/v1'
+$env:PDF_INSPECTOR_LLM_API_KEY='optional-local-or-remote-key'
+$env:PDF_INSPECTOR_LLM_MODEL='chat-model'
+$env:PDF_INSPECTOR_RAG_MAX_CONTEXT_TOKENS='4000'
+$env:PDF_INSPECTOR_RAG_MAX_OUTPUT_TOKENS='800'
+$env:PDF_INSPECTOR_RAG_MIN_EVIDENCE_SCORE='0.2'
+```
+
+Ask a grounded question:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/ask \
+  -H "Content-Type: application/json" \
+  -d '{"question":"How do I install the controller?","top_k":6}'
+```
+
+The response includes the answer, refusal flag, source citations, retrieval timing, context-token estimate, truncation status, provider/model, usage, and generation latency. Context selection follows search rank and never exceeds the configured budget; an oversized final chunk is truncated. When no result meets the evidence threshold, the service returns a fixed bilingual refusal without calling the LLM.
+
+Set `"stream": true` to receive Server-Sent Events. The stream emits `metadata`, one or more `token` events, then `done`; provider failures are returned as an `error` event. Proxy buffering is disabled through response headers.
+
 ## API summary
 
 | Method | Path | Purpose |
@@ -376,6 +402,7 @@ LangChain is intentionally not required by the search core. A future optional ad
 | `GET` | `/v1/knowledge-bases/{id}` | Read a knowledge base and counts |
 | `POST` | `/v1/knowledge-bases/{id}/search` | Search indexed chunks with metadata filters |
 | `POST` | `/v1/knowledge-bases/{id}/retrieval-evaluations` | Evaluate Recall@K, MRR, and latency |
+| `POST` | `/v1/knowledge-bases/{id}/ask` | Return a grounded answer or SSE stream with citations |
 | `PATCH` | `/v1/knowledge-bases/{id}` | Update name or description |
 | `DELETE` | `/v1/knowledge-bases/{id}` | Delete a knowledge base and its index |
 | `POST` | `/v1/knowledge-bases/{id}/documents` | Ingest a completed PDF task |

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import json
 from contextlib import asynccontextmanager
 from functools import partial
 from typing import Annotated
 
 try:
     from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-    from fastapi.responses import FileResponse, Response
+    from fastapi.responses import FileResponse, Response, StreamingResponse
 except ImportError as exc:
     raise RuntimeError(
         "backend dependencies are missing; install with `pip install -e '.[backend]'`"
@@ -17,6 +18,7 @@ except ImportError as exc:
 from .config import Settings
 from .embeddings import EmbeddingError
 from .knowledge_models import (
+    KnowledgeAskRequest,
     KnowledgeBaseCreate,
     KnowledgeBaseReindex,
     KnowledgeBaseUpdate,
@@ -32,6 +34,7 @@ from .knowledge_store import (
     KnowledgeDocumentNotFoundError,
     KnowledgeStore,
 )
+from .llm import LlmError
 from .ocr import create_ocr_provider
 from .processor import process_document
 from .profile_store import (
@@ -40,6 +43,7 @@ from .profile_store import (
     ProfileNotFoundError,
 )
 from .profiles import Profile
+from .rag_service import LlmFactory, RagService
 from .service import Processor, ResultNotReadyError, TaskService, UploadValidationError
 from .table_data import table_to_csv
 from .task_store import InvalidTaskStateError, TaskNotFoundError
@@ -51,6 +55,7 @@ def create_app(
     *,
     processor: Processor | None = None,
     embedding_factory: EmbeddingFactory | None = None,
+    llm_factory: LlmFactory | None = None,
     vector_store: VectorStore | None = None,
     start_workers: bool = True,
 ) -> FastAPI:
@@ -71,6 +76,7 @@ def create_app(
         embedding_factory=embedding_factory,
         start_workers=start_workers,
     )
+    rag = RagService(settings, knowledge, llm_factory=llm_factory)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
@@ -86,6 +92,7 @@ def create_app(
     )
     app.state.service = service
     app.state.knowledge = knowledge
+    app.state.rag = rag
 
     @app.get("/health")
     def health() -> dict:
@@ -176,6 +183,50 @@ def create_app(
                 status_code=404, detail="knowledge_base_not_found"
             ) from exc
         except (EmbeddingError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/v1/knowledge-bases/{knowledge_base_id}/ask")
+    def ask_knowledge_base(knowledge_base_id: str, payload: KnowledgeAskRequest):
+        try:
+            prepared = rag.prepare(
+                knowledge_base_id,
+                payload.question,
+                top_k=payload.top_k,
+                min_score=payload.min_score,
+                document_ids=payload.document_ids,
+                page_start=payload.page_start,
+                page_end=payload.page_end,
+                kinds=payload.kinds,
+                section_path_prefix=payload.section_path_prefix,
+                max_context_tokens=payload.max_context_tokens,
+                max_output_tokens=payload.max_output_tokens,
+            )
+            if not payload.stream:
+                return rag.answer(prepared)
+
+            def event_stream():
+                try:
+                    for event in rag.stream(prepared):
+                        yield (
+                            f"event: {event['event']}\n"
+                            f"data: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
+                        )
+                except (LlmError, ValueError) as exc:
+                    yield (
+                        "event: error\n"
+                        f"data: {json.dumps({'detail': str(exc)}, ensure_ascii=False)}\n\n"
+                    )
+
+            return StreamingResponse(
+                event_stream(),
+                media_type="text/event-stream",
+                headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+            )
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+        except (EmbeddingError, LlmError, ValueError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.patch("/v1/knowledge-bases/{knowledge_base_id}")

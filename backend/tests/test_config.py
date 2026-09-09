@@ -62,6 +62,35 @@ class ConfigTests(unittest.TestCase):
         ), self.assertRaisesRegex(ValueError, "PGVECTOR_DSN"):
             Settings.from_env()
 
+    def test_openai_compatible_llm_and_rag_environment_options(self):
+        environment = {
+            "PDF_INSPECTOR_LLM_PROVIDER": "openai_compatible",
+            "PDF_INSPECTOR_LLM_MODEL": "chat-model",
+            "PDF_INSPECTOR_LLM_BASE_URL": "http://model:8000/v1",
+            "PDF_INSPECTOR_LLM_API_KEY": "private-llm-key",
+            "PDF_INSPECTOR_LLM_TIMEOUT_SECONDS": "90",
+            "PDF_INSPECTOR_RAG_MAX_CONTEXT_TOKENS": "8192",
+            "PDF_INSPECTOR_RAG_MAX_OUTPUT_TOKENS": "1200",
+            "PDF_INSPECTOR_RAG_MIN_EVIDENCE_SCORE": "0.35",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = Settings.from_env()
+
+        self.assertEqual("openai_compatible", settings.llm_provider)
+        self.assertEqual("chat-model", settings.llm_model)
+        self.assertEqual(8192, settings.rag_max_context_tokens)
+        self.assertEqual(1200, settings.rag_max_output_tokens)
+        self.assertEqual(0.35, settings.rag_min_evidence_score)
+        self.assertNotIn("private-llm-key", repr(settings))
+
+    def test_openai_compatible_llm_requires_base_url(self):
+        with patch.dict(
+            os.environ,
+            {"PDF_INSPECTOR_LLM_PROVIDER": "openai_compatible"},
+            clear=True,
+        ), self.assertRaisesRegex(ValueError, "LLM_BASE_URL"):
+            Settings.from_env()
+
 
 if __name__ == "__main__":
     unittest.main()
