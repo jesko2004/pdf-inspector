@@ -206,6 +206,35 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(1.0, evaluation.json()["mean_recall_at_k"])
         self.assertEqual(1.0, evaluation.json()["mrr"])
 
+        answer = self.client.post(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/ask",
+            json={"question": "测试供应商", "min_score": -1},
+        )
+        self.assertEqual(200, answer.status_code)
+        self.assertFalse(answer.json()["refused"])
+        self.assertEqual([1], answer.json()["citations"][0]["pages"])
+        self.assertIn("测试供应商", answer.json()["answer"])
+
+        streamed = self.client.post(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/ask",
+            json={"question": "测试供应商", "min_score": -1, "stream": True},
+        )
+        self.assertEqual(200, streamed.status_code)
+        self.assertTrue(
+            streamed.headers["content-type"].startswith("text/event-stream")
+        )
+        self.assertIn("event: metadata", streamed.text)
+        self.assertIn("event: token", streamed.text)
+        self.assertIn("event: done", streamed.text)
+
+        refused = self.client.post(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/ask",
+            json={"question": "unknown", "document_ids": ["missing-document"]},
+        )
+        self.assertEqual(200, refused.status_code)
+        self.assertTrue(refused.json()["refused"])
+        self.assertEqual([], refused.json()["citations"])
+
         updated = self.client.patch(
             f"/v1/knowledge-bases/{knowledge_base['id']}",
             json={"description": "已更新的内部资料"},
