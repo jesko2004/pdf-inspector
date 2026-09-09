@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import sqlite3
 from contextlib import contextmanager
 from dataclasses import dataclass
@@ -30,6 +31,36 @@ class VectorRecord:
     metadata: dict[str, Any]
 
 
+@dataclass(frozen=True)
+class VectorSearchQuery:
+    knowledge_base_id: str
+    embedding: list[float]
+    embedding_provider: str
+    embedding_model: str
+    top_k: int
+    min_score: float = 0.0
+    document_ids: tuple[str, ...] = ()
+    page_start: int | None = None
+    page_end: int | None = None
+    kinds: tuple[str, ...] = ()
+    section_path_prefix: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class VectorSearchHit:
+    chunk_id: str
+    knowledge_base_id: str
+    document_id: str
+    score: float
+    content_hash: str
+    text: str
+    page_start: int
+    page_end: int
+    section_path: list[str]
+    kind: str
+    metadata: dict[str, Any]
+
+
 class VectorStore(Protocol):
     name: str
 
@@ -42,6 +73,8 @@ class VectorStore(Protocol):
     def delete_knowledge_base(self, knowledge_base_id: str) -> None: ...
 
     def count(self, *, document_id: str | None = None) -> int: ...
+
+    def search(self, query: VectorSearchQuery) -> list[VectorSearchHit]: ...
 
 
 class SQLiteVectorStore:
@@ -196,6 +229,78 @@ class SQLiteVectorStore:
             ).fetchall()
         return [dict(row) for row in rows]
 
+    def search(self, query: VectorSearchQuery) -> list[VectorSearchHit]:
+        if not query.embedding:
+            return []
+        where = [
+            "knowledge_base_id = ?",
+            "embedding_provider = ?",
+            "embedding_model = ?",
+            "embedding_dimensions = ?",
+        ]
+        parameters: list[Any] = [
+            query.knowledge_base_id,
+            query.embedding_provider,
+            query.embedding_model,
+            len(query.embedding),
+        ]
+        if query.document_ids:
+            placeholders = ",".join("?" for _ in query.document_ids)
+            where.append(f"document_id IN ({placeholders})")
+            parameters.extend(query.document_ids)
+        if query.page_start is not None:
+            where.append("page_end >= ?")
+            parameters.append(query.page_start)
+        if query.page_end is not None:
+            where.append("page_start <= ?")
+            parameters.append(query.page_end)
+        if query.kinds:
+            placeholders = ",".join("?" for _ in query.kinds)
+            where.append(f"kind IN ({placeholders})")
+            parameters.extend(query.kinds)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT * FROM knowledge_vectors WHERE " + " AND ".join(where),
+                parameters,
+            ).fetchall()
+
+        query_norm = math.sqrt(sum(value * value for value in query.embedding))
+        if query_norm == 0 or not math.isfinite(query_norm):
+            raise ValueError("search embedding must contain finite non-zero values")
+        hits = []
+        for row in rows:
+            section_path = json.loads(row["section_path_json"])
+            if query.section_path_prefix and section_path[
+                : len(query.section_path_prefix)
+            ] != list(query.section_path_prefix):
+                continue
+            embedding = [float(value) for value in json.loads(row["embedding_json"])]
+            norm = math.sqrt(sum(value * value for value in embedding))
+            if norm == 0 or len(embedding) != len(query.embedding):
+                continue
+            score = sum(
+                left * right for left, right in zip(query.embedding, embedding)
+            ) / (query_norm * norm)
+            if not math.isfinite(score) or score < query.min_score:
+                continue
+            hits.append(
+                VectorSearchHit(
+                    chunk_id=row["chunk_id"],
+                    knowledge_base_id=row["knowledge_base_id"],
+                    document_id=row["document_id"],
+                    score=score,
+                    content_hash=row["content_hash"],
+                    text=row["text"],
+                    page_start=int(row["page_start"]),
+                    page_end=int(row["page_end"]),
+                    section_path=section_path,
+                    kind=row["kind"],
+                    metadata=json.loads(row["metadata_json"]),
+                )
+            )
+        hits.sort(key=lambda item: (-item.score, item.document_id, item.chunk_id))
+        return hits[: query.top_k]
+
 
 class PgVectorStore:
     """Production vector store backed by PostgreSQL and the pgvector extension."""
@@ -348,6 +453,75 @@ class PgVectorStore:
                 ).fetchone()
         assert row is not None
         return int(row[0])
+
+    def search(self, query: VectorSearchQuery) -> list[VectorSearchHit]:
+        if not query.embedding:
+            return []
+        from pgvector import Vector
+
+        where = [
+            "knowledge_base_id = %s",
+            "embedding_provider = %s",
+            "embedding_model = %s",
+            "embedding_dimensions = %s",
+        ]
+        parameters: list[Any] = [
+            query.knowledge_base_id,
+            query.embedding_provider,
+            query.embedding_model,
+            len(query.embedding),
+        ]
+        if query.document_ids:
+            where.append("document_id = ANY(%s)")
+            parameters.append(list(query.document_ids))
+        if query.page_start is not None:
+            where.append("page_end >= %s")
+            parameters.append(query.page_start)
+        if query.page_end is not None:
+            where.append("page_start <= %s")
+            parameters.append(query.page_end)
+        if query.kinds:
+            where.append("kind = ANY(%s)")
+            parameters.append(list(query.kinds))
+        for index, section in enumerate(query.section_path_prefix):
+            where.append(f"section_path ->> {index} = %s")
+            parameters.append(section)
+
+        vector = Vector(query.embedding)
+        sql = f"""
+            WITH ranked AS (
+                SELECT chunk_id, knowledge_base_id, document_id, content_hash,
+                       text, page_start, page_end, section_path, kind, metadata,
+                       1 - (embedding <=> %s) AS score
+                  FROM pdf_inspector_vectors
+                 WHERE {" AND ".join(where)}
+            )
+            SELECT * FROM ranked
+             WHERE score >= %s
+          ORDER BY score DESC, document_id, chunk_id
+             LIMIT %s
+        """
+        with self._connect() as connection:
+            rows = connection.execute(
+                sql,
+                (vector, *parameters, query.min_score, query.top_k),
+            ).fetchall()
+        return [
+            VectorSearchHit(
+                chunk_id=row[0],
+                knowledge_base_id=row[1],
+                document_id=row[2],
+                content_hash=row[3],
+                text=row[4],
+                page_start=int(row[5]),
+                page_end=int(row[6]),
+                section_path=list(row[7]),
+                kind=row[8],
+                metadata=dict(row[9]),
+                score=float(row[10]),
+            )
+            for row in rows
+        ]
 
 
 def create_vector_store(settings: Settings) -> VectorStore:

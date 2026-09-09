@@ -168,6 +168,44 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual("completed", batches.json()["items"][0]["status"])
 
+        search = self.client.post(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/search",
+            json={
+                "query": "测试供应商",
+                "top_k": 3,
+                "min_score": -1,
+                "document_ids": [document["id"]],
+                "page_start": 1,
+                "page_end": 1,
+                "kinds": ["text"],
+            },
+        )
+        self.assertEqual(200, search.status_code)
+        self.assertEqual(1, search.json()["returned"])
+        self.assertEqual(document["id"], search.json()["items"][0]["document_id"])
+        self.assertEqual("manual.pdf", search.json()["items"][0]["filename"])
+        self.assertEqual([1], search.json()["items"][0]["citation"]["pages"])
+
+        evaluation = self.client.post(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/retrieval-evaluations",
+            json={
+                "top_k": 1,
+                "min_score": -1,
+                "cases": [
+                    {
+                        "id": "supplier-question",
+                        "query": "测试供应商",
+                        "expected_sources": [
+                            {"document_id": document["id"], "pages": [1]}
+                        ],
+                    }
+                ],
+            },
+        )
+        self.assertEqual(200, evaluation.status_code)
+        self.assertEqual(1.0, evaluation.json()["mean_recall_at_k"])
+        self.assertEqual(1.0, evaluation.json()["mrr"])
+
         updated = self.client.patch(
             f"/v1/knowledge-bases/{knowledge_base['id']}",
             json={"description": "已更新的内部资料"},

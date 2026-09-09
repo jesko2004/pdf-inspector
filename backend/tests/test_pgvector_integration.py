@@ -2,7 +2,7 @@ import os
 import unittest
 from uuid import uuid4
 
-from backend.vector_store import PgVectorStore, VectorRecord
+from backend.vector_store import PgVectorStore, VectorRecord, VectorSearchQuery
 
 PGVECTOR_DSN = os.environ.get("PDF_INSPECTOR_TEST_PGVECTOR_DSN")
 
@@ -38,6 +38,23 @@ class PgVectorIntegrationTests(unittest.TestCase):
             second = make_record("second", [0.0, 1.0, 0.0])
             store.upsert([first, second])
             self.assertEqual(2, store.count(document_id=document_id))
+            hits = store.search(
+                VectorSearchQuery(
+                    knowledge_base_id=knowledge_base_id,
+                    embedding=[1.0, 0.0, 0.0],
+                    embedding_provider="hash",
+                    embedding_model="hash-v1",
+                    top_k=2,
+                    min_score=0.1,
+                    document_ids=(document_id,),
+                    page_start=1,
+                    page_end=1,
+                    kinds=("text",),
+                    section_path_prefix=("Integration",),
+                )
+            )
+            self.assertEqual([first.chunk_id], [hit.chunk_id for hit in hits])
+            self.assertAlmostEqual(1.0, hits[0].score)
 
             store.upsert([make_record("first", [0.5, 0.5, 0.0])])
             self.assertEqual(2, store.count(document_id=document_id))

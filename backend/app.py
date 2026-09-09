@@ -21,6 +21,8 @@ from .knowledge_models import (
     KnowledgeBaseReindex,
     KnowledgeBaseUpdate,
     KnowledgeDocumentIngest,
+    KnowledgeRetrievalEvaluationRequest,
+    KnowledgeSearchRequest,
 )
 from .knowledge_service import EmbeddingFactory, KnowledgeService
 from .knowledge_store import (
@@ -129,6 +131,52 @@ def create_app(
             raise HTTPException(
                 status_code=404, detail="knowledge_base_not_found"
             ) from exc
+
+    @app.post("/v1/knowledge-bases/{knowledge_base_id}/search")
+    def search_knowledge_base(
+        knowledge_base_id: str, payload: KnowledgeSearchRequest
+    ) -> dict:
+        try:
+            return knowledge.search(
+                knowledge_base_id,
+                payload.query,
+                top_k=payload.top_k,
+                min_score=payload.min_score,
+                document_ids=payload.document_ids,
+                page_start=payload.page_start,
+                page_end=payload.page_end,
+                kinds=payload.kinds,
+                section_path_prefix=payload.section_path_prefix,
+            )
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+        except (EmbeddingError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/v1/knowledge-bases/{knowledge_base_id}/retrieval-evaluations")
+    def evaluate_knowledge_retrieval(
+        knowledge_base_id: str, payload: KnowledgeRetrievalEvaluationRequest
+    ) -> dict:
+        try:
+            return knowledge.evaluate_retrieval(
+                knowledge_base_id,
+                [case.model_dump(mode="json") for case in payload.cases],
+                top_k=payload.top_k,
+                min_score=payload.min_score,
+                document_ids=payload.document_ids,
+                page_start=payload.page_start,
+                page_end=payload.page_end,
+                kinds=payload.kinds,
+                section_path_prefix=payload.section_path_prefix,
+            )
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+        except (EmbeddingError, ValueError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.patch("/v1/knowledge-bases/{knowledge_base_id}")
     def update_knowledge_base(

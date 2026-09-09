@@ -319,6 +319,41 @@ curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/reindex \
 
 Reindexing uses stable chunk IDs and overwrites each vector only after its replacement batch succeeds. A failed batch therefore remains observable and independently retryable rather than forcing the entire document to restart.
 
+### Search and retrieval evaluation
+
+Search a knowledge base with cosine similarity:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/search \
+  -H "Content-Type: application/json" \
+  -d '{
+    "query":"How do I install the controller?",
+    "top_k":5,
+    "min_score":0.25,
+    "document_ids":["DOCUMENT_ID"],
+    "page_start":1,
+    "page_end":20,
+    "kinds":["text"],
+    "section_path_prefix":["Installation"]
+  }'
+```
+
+All filters are optional. Page bounds use overlap semantics, so a chunk is included when any of its pages falls inside the requested range. `section_path_prefix` matches the beginning of the complete heading path. Search only considers vectors produced by the knowledge base's current provider, model, and dimensions, preventing stale vectors from a partial reindex from being returned.
+
+Every hit has a stable response shape with rank, cosine score, chunk ID, source document/task, original content, content hash, kind, page range, section path, and a ready-to-render `citation` object. The response also records end-to-end search latency.
+
+Evaluate a version-controlled question set with expected document/page evidence:
+
+```bash
+curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/retrieval-evaluations \
+  -H "Content-Type: application/json" \
+  --data @examples/retrieval_eval.sample.json
+```
+
+The evaluator reports per-case Recall@K, reciprocal rank, first relevant rank, matched sources, and latency, plus aggregate mean Recall@K, MRR, mean latency, p95 latency, embedding time, and total runtime. An expected source with no `pages` accepts any hit from its document; when pages are supplied, at least one cited page must overlap.
+
+LangChain is intentionally not required by the search core. A future optional adapter can expose this API as a LangChain Retriever without moving indexing, filtering, citation, or evaluation behavior out of the service.
+
 ## API summary
 
 | Method | Path | Purpose |
@@ -339,6 +374,8 @@ Reindexing uses stable chunk IDs and overwrites each vector only after its repla
 | `POST` | `/v1/knowledge-bases` | Create a knowledge base |
 | `GET` | `/v1/knowledge-bases` | List knowledge bases |
 | `GET` | `/v1/knowledge-bases/{id}` | Read a knowledge base and counts |
+| `POST` | `/v1/knowledge-bases/{id}/search` | Search indexed chunks with metadata filters |
+| `POST` | `/v1/knowledge-bases/{id}/retrieval-evaluations` | Evaluate Recall@K, MRR, and latency |
 | `PATCH` | `/v1/knowledge-bases/{id}` | Update name or description |
 | `DELETE` | `/v1/knowledge-bases/{id}` | Delete a knowledge base and its index |
 | `POST` | `/v1/knowledge-bases/{id}/documents` | Ingest a completed PDF task |
