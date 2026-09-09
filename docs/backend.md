@@ -1,6 +1,6 @@
 # PDF task API and business profiles
 
-The optional backend turns the native extractor into a persistent local HTTP service. It is designed for trusted internal networks; put authentication, TLS, and rate limiting at the gateway before exposing it publicly.
+The optional backend turns the native extractor into a persistent HTTP service. It includes optional API-key authentication, role checks, rate limits, audit records, Prometheus metrics, and verified local backups. Terminate TLS at a trusted reverse proxy before exposing it publicly.
 
 ## Install and start
 
@@ -44,8 +44,42 @@ Environment variables:
 | `PDF_INSPECTOR_EMBEDDING_BASE_URL` | unset | OpenAI-compatible API base URL, normally ending in `/v1` |
 | `PDF_INSPECTOR_EMBEDDING_API_KEY` | unset | Optional bearer token; never written to the database |
 | `PDF_INSPECTOR_EMBEDDING_TIMEOUT_SECONDS` | `60` | Timeout for one embedding HTTP batch |
+| `PDF_INSPECTOR_API_KEYS_JSON` | `[]` | API keys and `read`/`write`/`admin` roles; an empty array keeps local development unauthenticated |
+| `PDF_INSPECTOR_SEARCH_RATE_LIMIT_PER_MINUTE` | `120` | Per-key/IP search requests per minute |
+| `PDF_INSPECTOR_ASK_RATE_LIMIT_PER_MINUTE` | `30` | Per-key/IP answer requests per minute |
+| `PDF_INSPECTOR_MAX_ACTIVE_TASKS` | `100` | Maximum combined queued and processing PDF tasks |
 
 For multi-host deployment, replace the in-process executor and local files with a shared queue/object store. A single service process is durable across restarts: SQLite retains tasks and interrupted `processing` tasks are queued again on startup.
+
+## Production controls
+
+Configure API keys as a JSON array. Keys are accepted through `Authorization: Bearer` or `X-API-Key`; secrets never appear in logs, metrics, or audit rows.
+
+```powershell
+$env:PDF_INSPECTOR_API_KEYS_JSON='[
+  {"id":"app-reader","key":"replace-read-secret","role":"read"},
+  {"id":"pipeline","key":"replace-write-secret","role":"write"},
+  {"id":"operator","key":"replace-admin-secret","role":"admin"}
+]'
+```
+
+`read` can call GET endpoints plus search, evaluation, and answer endpoints. `write` also creates tasks, profiles, knowledge bases, ingestion jobs, retries, and reindex jobs. `admin` additionally deletes resources, reads audit events, and scrapes metrics. `/health` and OpenAPI pages remain public. Authentication is disabled only when the key array is empty.
+
+Every response includes `X-Request-ID`; a valid caller-supplied ID is preserved. Structured request logs and mutating/denied audit events use the same ID. Admins can inspect audit history with `GET /v1/audit-events`. `GET /metrics` exposes Prometheus text metrics for HTTP traffic, operation errors and duration, task/index queue depth, embedding/retrieval/LLM activity, Token usage, refusals, and rate-limit rejection.
+
+Upload bytes, active tasks, per-key/IP search and answer frequency, and RAG context/output Tokens are bounded. Rate and capacity failures return HTTP `429` with a stable error detail; rate responses include `Retry-After`. The in-memory rate limiter is intentionally single-process. Use a gateway or Redis-backed limiter when phase-5 multi-instance work is enabled.
+
+SQLite stores maintain a `schema_migrations` ledger and validate migration names/versions at startup. Migrations run transactionally and are forward-only. The current baseline is version 1; future schema changes must be appended as a new migration. Roll back an incompatible release by restoring its verified pre-upgrade backup rather than attempting an in-place downgrade.
+
+Create, verify, and restore a complete local backup:
+
+```powershell
+pdf-inspector-backup create .pdf-inspector-data backups\pdf-inspector-20260909.tar.gz
+pdf-inspector-backup verify backups\pdf-inspector-20260909.tar.gz
+pdf-inspector-backup restore backups\pdf-inspector-20260909.tar.gz .pdf-inspector-restored
+```
+
+SQLite files are copied through the online backup API, while uploads, results, profiles, vector data, and audit data are checksummed in a versioned manifest. Restore rejects path traversal, checksum mismatches, undeclared files, and non-empty targets. Restore into a new directory, run application checks against it, then switch `PDF_INSPECTOR_DATA_DIR`; this keeps the previous dataset available for rollback. Schedule `create` and `verify` with the platform scheduler and copy archives to separate storage.
 
 ## Task workflow
 
@@ -352,7 +386,7 @@ curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/retrieval-evaluation
 
 The evaluator reports per-case Recall@K, reciprocal rank, first relevant rank, matched sources, and latency, plus aggregate mean Recall@K, MRR, mean latency, p95 latency, embedding time, and total runtime. An expected source with no `pages` accepts any hit from its document; when pages are supplied, at least one cited page must overlap.
 
-LangChain is intentionally not required by the search core. A future optional adapter can expose this API as a LangChain Retriever without moving indexing, filtering, citation, or evaluation behavior out of the service.
+LangChain is intentionally not required by the search core. It would not accelerate vector search or model inference and would add adapters and serialization on this already-complete path. The useful integration point is an optional phase-6 retriever/chain adapter, when query rewriting, multi-route retrieval, external tools, or replaceable orchestration graphs justify its components. Indexing, filters, citations, evaluation, permissions, and limits should remain owned by this service.
 
 ### Grounded RAG answers
 
@@ -385,6 +419,8 @@ Set `"stream": true` to receive Server-Sent Events. The stream emits `metadata`,
 | Method | Path | Purpose |
 |---|---|---|
 | `GET` | `/health` | Liveness check |
+| `GET` | `/metrics` | Prometheus metrics (admin) |
+| `GET` | `/v1/audit-events` | Mutating and denied request audit trail (admin) |
 | `GET` | `/v1/profiles` | List complete built-in and custom profiles |
 | `GET` | `/v1/profiles/{id}` | Read a profile |
 | `POST` | `/v1/profiles` | Create a custom profile |

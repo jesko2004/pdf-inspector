@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import nullcontext
 from pathlib import Path
 from threading import Lock
 from typing import BinaryIO, Callable
@@ -20,6 +21,10 @@ class UploadValidationError(ValueError):
     pass
 
 
+class CapacityExceededError(RuntimeError):
+    pass
+
+
 Processor = Callable[[Path, Profile], dict]
 
 
@@ -30,6 +35,7 @@ class TaskService:
         *,
         processor: Processor = process_document,
         start_workers: bool = True,
+        metrics=None,
     ):
         settings.create_directories()
         self.settings = settings
@@ -39,6 +45,7 @@ class TaskService:
         self.tasks = TaskStore(settings.database_path)
         self.processor = processor
         self.start_workers = start_workers
+        self.metrics = metrics
         self.executor = ThreadPoolExecutor(
             max_workers=settings.worker_count, thread_name_prefix="pdf-task"
         )
@@ -49,6 +56,8 @@ class TaskService:
                 self._submit(task_id)
 
     def create_task(self, filename: str, stream: BinaryIO, profile_id: str) -> dict:
+        if self.tasks.count_active() >= self.settings.max_active_tasks:
+            raise CapacityExceededError("active task limit reached; retry later")
         profile = self.profiles.get(profile_id)
         task_id = str(uuid4())
         destination = self.settings.upload_dir / f"{task_id}.pdf"
@@ -147,7 +156,13 @@ class TaskService:
         row = self.tasks.get(task_id)
         try:
             profile = Profile.model_validate_json(row["profile_json"])
-            result = self.processor(Path(row["pdf_path"]), profile)
+            timing = (
+                self.metrics.timer("pdf_processing")
+                if self.metrics is not None
+                else nullcontext()
+            )
+            with timing:
+                result = self.processor(Path(row["pdf_path"]), profile)
             result.update(
                 {
                     "task_id": task_id,

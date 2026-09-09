@@ -91,6 +91,35 @@ class ConfigTests(unittest.TestCase):
         ), self.assertRaisesRegex(ValueError, "LLM_BASE_URL"):
             Settings.from_env()
 
+    def test_security_and_limit_environment_options(self):
+        environment = {
+            "PDF_INSPECTOR_API_KEYS_JSON": (
+                '[{"id":"reader","key":"secret","role":"read"}]'
+            ),
+            "PDF_INSPECTOR_SEARCH_RATE_LIMIT_PER_MINUTE": "10",
+            "PDF_INSPECTOR_ASK_RATE_LIMIT_PER_MINUTE": "5",
+            "PDF_INSPECTOR_MAX_ACTIVE_TASKS": "8",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = Settings.from_env()
+
+        self.assertEqual((("reader", "secret", "read"),), settings.api_keys)
+        self.assertEqual(10, settings.search_rate_limit_per_minute)
+        self.assertEqual(5, settings.ask_rate_limit_per_minute)
+        self.assertEqual(8, settings.max_active_tasks)
+        self.assertNotIn("secret", repr(settings))
+
+    def test_invalid_api_key_role_is_rejected(self):
+        environment = {
+            "PDF_INSPECTOR_API_KEYS_JSON": (
+                '[{"id":"bad","key":"secret","role":"owner"}]'
+            )
+        }
+        with patch.dict(os.environ, environment, clear=True), self.assertRaisesRegex(
+            ValueError, "role"
+        ):
+            Settings.from_env()
+
 
 if __name__ == "__main__":
     unittest.main()

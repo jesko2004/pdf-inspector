@@ -36,6 +36,12 @@ class Settings:
     rag_max_context_tokens: int = 4000
     rag_max_output_tokens: int = 800
     rag_min_evidence_score: float = 0.2
+    api_keys: tuple[tuple[str, str, str], ...] = field(
+        default_factory=tuple, repr=False
+    )
+    search_rate_limit_per_minute: int = 120
+    ask_rate_limit_per_minute: int = 30
+    max_active_tasks: int = 100
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -93,6 +99,14 @@ class Settings:
         rag_min_evidence_score = float(
             os.environ.get("PDF_INSPECTOR_RAG_MIN_EVIDENCE_SCORE", "0.2")
         )
+        api_keys_raw = os.environ.get("PDF_INSPECTOR_API_KEYS_JSON", "[]")
+        search_rate_limit = int(
+            os.environ.get("PDF_INSPECTOR_SEARCH_RATE_LIMIT_PER_MINUTE", "120")
+        )
+        ask_rate_limit = int(
+            os.environ.get("PDF_INSPECTOR_ASK_RATE_LIMIT_PER_MINUTE", "30")
+        )
+        max_active_tasks = int(os.environ.get("PDF_INSPECTOR_MAX_ACTIVE_TASKS", "100"))
         ocr_command = None
         if ocr_command_raw:
             parsed = json.loads(ocr_command_raw)
@@ -174,6 +188,43 @@ class Settings:
             raise ValueError(
                 "PDF_INSPECTOR_RAG_MIN_EVIDENCE_SCORE must be between -1 and 1"
             )
+        try:
+            parsed_api_keys = json.loads(api_keys_raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError("PDF_INSPECTOR_API_KEYS_JSON must be valid JSON") from exc
+        if not isinstance(parsed_api_keys, list):
+            raise ValueError(  # noqa: TRY004 - environment configuration is invalid
+                "PDF_INSPECTOR_API_KEYS_JSON must be a JSON array"
+            )
+        api_keys = []
+        for item in parsed_api_keys:
+            if not isinstance(item, dict):
+                raise ValueError(  # noqa: TRY004 - environment configuration is invalid
+                    "each API key entry must be an object"
+                )
+            key_id = item.get("id")
+            secret = item.get("key")
+            role = item.get("role")
+            if not all(
+                isinstance(value, str) and value.strip()
+                for value in (key_id, secret, role)
+            ):
+                raise ValueError("each API key requires non-empty id, key, and role")
+            if role not in {"read", "write", "admin"}:
+                raise ValueError("API key role must be one of: read, write, admin")
+            api_keys.append((key_id.strip(), secret, role))
+        if len({item[0] for item in api_keys}) != len(api_keys):
+            raise ValueError("API key IDs must be unique")
+        if len({item[1] for item in api_keys}) != len(api_keys):
+            raise ValueError("API key secrets must be unique")
+        if search_rate_limit < 1:
+            raise ValueError(
+                "PDF_INSPECTOR_SEARCH_RATE_LIMIT_PER_MINUTE must be positive"
+            )
+        if ask_rate_limit < 1:
+            raise ValueError("PDF_INSPECTOR_ASK_RATE_LIMIT_PER_MINUTE must be positive")
+        if max_active_tasks < 1:
+            raise ValueError("PDF_INSPECTOR_MAX_ACTIVE_TASKS must be positive")
         return cls(
             data_dir=data_dir,
             builtin_profile_dir=profile_dir,
@@ -201,6 +252,10 @@ class Settings:
             rag_max_context_tokens=rag_max_context_tokens,
             rag_max_output_tokens=rag_max_output_tokens,
             rag_min_evidence_score=rag_min_evidence_score,
+            api_keys=tuple(api_keys),
+            search_rate_limit_per_minute=search_rate_limit,
+            ask_rate_limit_per_minute=ask_rate_limit,
+            max_active_tasks=max_active_tasks,
         )
 
     @property
@@ -222,6 +277,10 @@ class Settings:
     @property
     def knowledge_database_path(self) -> Path:
         return self.data_dir / "knowledge.sqlite3"
+
+    @property
+    def audit_database_path(self) -> Path:
+        return self.data_dir / "audit.sqlite3"
 
     def create_directories(self) -> None:
         for path in (

@@ -65,8 +65,14 @@ class RagService:
         max_context_tokens: int | None,
         max_output_tokens: int | None,
     ) -> PreparedAnswer:
-        context_budget = max_context_tokens or self.settings.rag_max_context_tokens
-        output_budget = max_output_tokens or self.settings.rag_max_output_tokens
+        context_budget = min(
+            max_context_tokens or self.settings.rag_max_context_tokens,
+            self.settings.rag_max_context_tokens,
+        )
+        output_budget = min(
+            max_output_tokens or self.settings.rag_max_output_tokens,
+            self.settings.rag_max_output_tokens,
+        )
         effective_min_score = (
             self.settings.rag_min_evidence_score if min_score is None else min_score
         )

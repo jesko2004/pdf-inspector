@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import hashlib
 from collections import defaultdict
+from contextlib import nullcontext
 from pathlib import Path
+from time import perf_counter
 from typing import Any
 
 from .chunking import chunk_pages_with_report
@@ -78,10 +80,15 @@ def process_document(
     profile: Profile,
     engine: Any | None = None,
     ocr_provider: OcrProvider | None = None,
+    metrics=None,
 ) -> dict:
     """Extract, OCR-complete, normalize tables, and create RAG-ready chunks."""
     engine = engine or _load_engine()
-    page_result = engine.extract_pages_markdown(str(pdf_path))
+    extraction_timing = (
+        metrics.timer("pdf_extraction") if metrics is not None else nullcontext()
+    )
+    with extraction_timing:
+        page_result = engine.extract_pages_markdown(str(pdf_path))
     pages = [
         {
             "page": int(page.page),
@@ -96,6 +103,7 @@ def process_document(
     completed_ocr_pages: list[int] = []
     ocr_error = None
     if requested_ocr_pages and ocr_provider is not None:
+        ocr_started = perf_counter()
         try:
             for ocr_page in ocr_provider.extract_pages(pdf_path, requested_ocr_pages):
                 if ocr_page.page not in pages_by_number:
@@ -108,6 +116,13 @@ def process_document(
                 completed_ocr_pages.append(ocr_page.page)
         except Exception as exc:  # noqa: BLE001 - OCR failure keeps native partial output
             ocr_error = {"code": type(exc).__name__, "message": str(exc)}
+        finally:
+            if metrics is not None:
+                metrics.observe(
+                    "ocr",
+                    perf_counter() - ocr_started,
+                    "error" if ocr_error else "success",
+                )
     completed_ocr_pages = sorted(set(completed_ocr_pages))
     unresolved_ocr_pages = sorted(set(requested_ocr_pages) - set(completed_ocr_pages))
 

@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
 
+from .migrations import Migration, apply_migrations
 from .task_store import utc_now
 
 DOCUMENT_STATUSES = {"queued", "indexing", "ready", "partial", "failed"}
@@ -168,6 +169,18 @@ class KnowledgeStore:
                     ON embedding_batches(status, created_at);
                 """
             )
+            apply_migrations(
+                connection,
+                "knowledge",
+                (Migration(1, "baseline_knowledge_schema", "SELECT 1;"),),
+            )
+
+    def batch_status_counts(self) -> dict[str, int]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT status, COUNT(*) AS count FROM embedding_batches GROUP BY status"
+            ).fetchall()
+        return {str(row["status"]): int(row["count"]) for row in rows}
 
     def create_knowledge_base(
         self,

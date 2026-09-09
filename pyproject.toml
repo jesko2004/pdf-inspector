@@ -43,6 +43,7 @@ test = [
 
 [project.scripts]
 pdf-inspector-api = "backend.server:run"
+pdf-inspector-backup = "backend.backup:main"
 
 [tool.maturin]
 features = ["python"]

@@ -35,6 +35,7 @@ class KnowledgeService:
         *,
         embedding_factory: EmbeddingFactory | None = None,
         start_workers: bool = True,
+        metrics=None,
     ):
         self.settings = settings
         self.task_service = task_service
@@ -42,6 +43,7 @@ class KnowledgeService:
         self.vector_store = vector_store
         self.embedding_factory = embedding_factory or self._default_embedding_factory
         self.start_workers = start_workers
+        self.metrics = metrics
         self.executor = ThreadPoolExecutor(
             max_workers=settings.worker_count, thread_name_prefix="knowledge-index"
         )
@@ -78,6 +80,14 @@ class KnowledgeService:
         created = self.embedding_factory(provider, model, dimensions)
         if created.dimensions != dimensions:
             raise ValueError("embedding provider dimensions do not match configuration")
+
+    def _embed(
+        self, provider: EmbeddingProvider, texts: list[str]
+    ) -> list[list[float]]:
+        if self.metrics is None:
+            return provider.embed(texts)
+        with self.metrics.timer("embedding"):
+            return provider.embed(texts)
 
     def create_knowledge_base(
         self,
@@ -374,12 +384,13 @@ class KnowledgeService:
             knowledge_base["embedding_model"],
             int(knowledge_base["embedding_dimensions"]),
         )
-        vectors = provider.embed([query])
+        vectors = self._embed(provider, [query])
         if len(vectors) != 1:
             raise ValueError("embedding provider returned an unexpected batch size")
         embedding = self._normalize_vector(
             vectors[0], int(knowledge_base["embedding_dimensions"])
         )
+        retrieval_started = perf_counter()
         hits = self._search_hits(
             knowledge_base,
             embedding,
@@ -391,6 +402,8 @@ class KnowledgeService:
             kinds=kinds,
             section_path_prefix=section_path_prefix,
         )
+        if self.metrics is not None:
+            self.metrics.observe("retrieval", perf_counter() - retrieval_started)
         items = self._format_hits(hits)
         return {
             "knowledge_base_id": knowledge_base_id,
@@ -432,7 +445,7 @@ class KnowledgeService:
             int(knowledge_base["embedding_dimensions"]),
         )
         embedding_started = perf_counter()
-        vectors = provider.embed([case["query"] for case in cases])
+        vectors = self._embed(provider, [case["query"] for case in cases])
         embedding_ms = (perf_counter() - embedding_started) * 1000
         if len(vectors) != len(cases):
             raise ValueError("embedding provider returned an unexpected batch size")
@@ -554,7 +567,7 @@ class KnowledgeService:
                 document["embedding_model"],
                 int(document["embedding_dimensions"]),
             )
-            vectors = provider.embed([chunk["text"] for chunk in chunks])
+            vectors = self._embed(provider, [chunk["text"] for chunk in chunks])
             if len(vectors) != len(chunks):
                 raise ValueError("embedding provider returned an unexpected batch size")
             records = []

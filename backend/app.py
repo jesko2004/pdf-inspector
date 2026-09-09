@@ -3,13 +3,22 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from contextlib import asynccontextmanager
 from functools import partial
+from time import perf_counter
 from typing import Annotated
+from uuid import uuid4
 
 try:
-    from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-    from fastapi.responses import FileResponse, Response, StreamingResponse
+    from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+    from fastapi.responses import (
+        FileResponse,
+        JSONResponse,
+        Response,
+        StreamingResponse,
+    )
 except ImportError as exc:
     raise RuntimeError(
         "backend dependencies are missing; install with `pip install -e '.[backend]'`"
@@ -35,6 +44,12 @@ from .knowledge_store import (
     KnowledgeStore,
 )
 from .llm import LlmError
+from .observability import (
+    AuditStore,
+    MetricsRegistry,
+    SlidingWindowRateLimiter,
+    json_log,
+)
 from .ocr import create_ocr_provider
 from .processor import process_document
 from .profile_store import (
@@ -44,7 +59,19 @@ from .profile_store import (
 )
 from .profiles import Profile
 from .rag_service import LlmFactory, RagService
-from .service import Processor, ResultNotReadyError, TaskService, UploadValidationError
+from .security import (
+    ApiKeyAuthenticator,
+    Principal,
+    has_permission,
+    required_permission,
+)
+from .service import (
+    CapacityExceededError,
+    Processor,
+    ResultNotReadyError,
+    TaskService,
+    UploadValidationError,
+)
 from .table_data import table_to_csv
 from .task_store import InvalidTaskStateError, TaskNotFoundError
 from .vector_store import VectorStore, create_vector_store
@@ -60,13 +87,18 @@ def create_app(
     start_workers: bool = True,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
+    metrics = MetricsRegistry()
+    audit = AuditStore(settings.audit_database_path)
+    authenticator = ApiKeyAuthenticator(settings.api_keys)
+    rate_limiter = SlidingWindowRateLimiter()
     configured_processor = processor or partial(
-        process_document, ocr_provider=create_ocr_provider(settings)
+        process_document, ocr_provider=create_ocr_provider(settings), metrics=metrics
     )
     service = TaskService(
         settings,
         processor=configured_processor,
         start_workers=start_workers,
+        metrics=metrics,
     )
     knowledge = KnowledgeService(
         settings,
@@ -75,6 +107,7 @@ def create_app(
         vector_store or create_vector_store(settings),
         embedding_factory=embedding_factory,
         start_workers=start_workers,
+        metrics=metrics,
     )
     rag = RagService(settings, knowledge, llm_factory=llm_factory)
 
@@ -93,10 +126,155 @@ def create_app(
     app.state.service = service
     app.state.knowledge = knowledge
     app.state.rag = rag
+    app.state.metrics = metrics
+    app.state.audit = audit
+
+    @app.middleware("http")
+    async def production_controls(request: Request, call_next):
+        started = perf_counter()
+        supplied_request_id = request.headers.get("x-request-id", "")
+        request_id = (
+            supplied_request_id
+            if re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", supplied_request_id)
+            else str(uuid4())
+        )
+        required = required_permission(request.method, request.url.path)
+        principal = Principal("anonymous", "admin")
+        if authenticator.enabled and required is not None:
+            principal = authenticator.authenticate(
+                authenticator.extract(request.headers)
+            )
+            if principal is None:
+                response = JSONResponse(
+                    {"detail": "missing_or_invalid_api_key", "request_id": request_id},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+                _record_request(
+                    request, response.status_code, request_id, None, started, required
+                )
+                response.headers["X-Request-ID"] = request_id
+                return response
+            if not has_permission(principal, required):
+                response = JSONResponse(
+                    {"detail": "insufficient_permission", "request_id": request_id},
+                    status_code=403,
+                )
+                _record_request(
+                    request,
+                    response.status_code,
+                    request_id,
+                    principal,
+                    started,
+                    required,
+                )
+                response.headers["X-Request-ID"] = request_id
+                return response
+        request.state.principal = principal
+        bucket = None
+        limit = 0
+        if request.url.path.endswith("/ask"):
+            bucket, limit = "ask", settings.ask_rate_limit_per_minute
+        elif request.url.path.endswith("/search"):
+            bucket, limit = "search", settings.search_rate_limit_per_minute
+        if bucket:
+            client_ip = request.client.host if request.client else "unknown"
+            identity = principal.key_id if authenticator.enabled else client_ip
+            allowed, retry_after = rate_limiter.allow(identity, bucket, limit)
+            if not allowed:
+                metrics.increment(
+                    "pdf_inspector_rate_limit_rejections_total", bucket=bucket
+                )
+                response = JSONResponse(
+                    {"detail": "rate_limit_exceeded", "request_id": request_id},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                )
+                _record_request(
+                    request,
+                    response.status_code,
+                    request_id,
+                    principal,
+                    started,
+                    required,
+                )
+                response.headers["X-Request-ID"] = request_id
+                return response
+        try:
+            response = await call_next(request)
+        except Exception:
+            _record_request(request, 500, request_id, principal, started, required)
+            raise
+        response.headers["X-Request-ID"] = request_id
+        _record_request(
+            request, response.status_code, request_id, principal, started, required
+        )
+        return response
+
+    def _record_request(
+        request: Request,
+        status_code: int,
+        request_id: str,
+        principal: Principal | None,
+        started: float,
+        required: str | None,
+    ) -> None:
+        duration = perf_counter() - started
+        route = request.scope.get("route")
+        path = getattr(route, "path", request.url.path)
+        metrics.increment(
+            "pdf_inspector_http_requests_total",
+            method=request.method,
+            path=path,
+            status=str(status_code),
+        )
+        metrics.observe(
+            "http_request", duration, "error" if status_code >= 400 else "success"
+        )
+        logging.getLogger("uvicorn.access").info(
+            json_log(
+                request_id=request_id,
+                actor_id=principal.key_id if principal else "unauthenticated",
+                method=request.method,
+                path=path,
+                status_code=status_code,
+                duration_ms=round(duration * 1000, 3),
+            )
+        )
+        if required in {"write", "admin"} or status_code in {401, 403}:
+            audit.record(
+                request_id=request_id,
+                actor_id=principal.key_id if principal else "unauthenticated",
+                actor_role=principal.role if principal else None,
+                method=request.method,
+                path=path,
+                status_code=status_code,
+                duration_ms=duration * 1000,
+                client_ip=request.client.host if request.client else None,
+            )
 
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}
+
+    @app.get("/metrics", response_class=Response)
+    def prometheus_metrics() -> Response:
+        for status in ("queued", "processing", "ready", "needs_review", "failed"):
+            metrics.set_gauge("pdf_inspector_tasks", 0, status=status)
+        for status, count in service.tasks.status_counts().items():
+            metrics.set_gauge("pdf_inspector_tasks", count, status=status)
+        for status in ("queued", "processing", "completed", "failed"):
+            metrics.set_gauge("pdf_inspector_embedding_batches", 0, status=status)
+        for status, count in knowledge.store.batch_status_counts().items():
+            metrics.set_gauge("pdf_inspector_embedding_batches", count, status=status)
+        return Response(metrics.render(), media_type="text/plain; version=0.0.4")
+
+    @app.get("/v1/audit-events")
+    def list_audit_events(
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict:
+        return {"items": audit.list(limit, offset), "limit": limit, "offset": offset}
 
     @app.get("/v1/profiles")
     def list_profiles() -> dict:
@@ -188,6 +366,28 @@ def create_app(
     @app.post("/v1/knowledge-bases/{knowledge_base_id}/ask")
     def ask_knowledge_base(knowledge_base_id: str, payload: KnowledgeAskRequest):
         try:
+            if (
+                payload.max_context_tokens is not None
+                and payload.max_context_tokens > settings.rag_max_context_tokens
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "context_token_limit_exceeded",
+                        "maximum": settings.rag_max_context_tokens,
+                    },
+                )
+            if (
+                payload.max_output_tokens is not None
+                and payload.max_output_tokens > settings.rag_max_output_tokens
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "output_token_limit_exceeded",
+                        "maximum": settings.rag_max_output_tokens,
+                    },
+                )
             prepared = rag.prepare(
                 knowledge_base_id,
                 payload.question,
@@ -202,11 +402,31 @@ def create_app(
                 max_output_tokens=payload.max_output_tokens,
             )
             if not payload.stream:
-                return rag.answer(prepared)
+                answer = rag.answer(prepared)
+                metrics.observe(
+                    "llm_generation", answer["generation_latency_ms"] / 1000
+                )
+                if answer["refused"]:
+                    metrics.increment("pdf_inspector_rag_refusals_total")
+                for token_kind, count in answer["usage"].items():
+                    if isinstance(count, int):
+                        metrics.increment(
+                            "pdf_inspector_llm_tokens_total",
+                            count,
+                            token_kind=token_kind,
+                        )
+                return answer
 
             def event_stream():
                 try:
                     for event in rag.stream(prepared):
+                        if event["event"] == "done":
+                            metrics.observe(
+                                "llm_generation",
+                                event["data"]["generation_latency_ms"] / 1000,
+                            )
+                            if prepared.refused:
+                                metrics.increment("pdf_inspector_rag_refusals_total")
                         yield (
                             f"event: {event['event']}\n"
                             f"data: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
@@ -437,6 +657,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="profile_not_found") from exc
         except UploadValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except CapacityExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
 
     @app.get("/v1/tasks")
     def list_tasks(

@@ -262,6 +262,13 @@ class ApiTests(unittest.TestCase):
         )
         self.assertEqual(204, deleted_knowledge_base.status_code)
 
+        metrics = self.client.get("/metrics")
+        self.assertEqual(200, metrics.status_code)
+        self.assertIn('operation="pdf_processing"', metrics.text)
+        self.assertIn('operation="embedding"', metrics.text)
+        self.assertIn('operation="retrieval"', metrics.text)
+        self.assertIn('operation="llm_generation"', metrics.text)
+
 
 if __name__ == "__main__":
     unittest.main()
