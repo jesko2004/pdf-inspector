@@ -4,6 +4,8 @@
 
 Fast Rust library for PDF classification and text extraction. Detects whether a PDF is text-based or scanned, extracts text with position awareness, and converts to clean Markdown — all without OCR. Includes bindings for [Python](docs/python.md), [Node.js](napi/README.md), and [browser WebAssembly](wasm/README.md).
 
+An optional [persistent task API and configurable business-profile backend](docs/backend.md) adds PDF uploads, asynchronous status/result/retry endpoints, and evidence-backed field extraction. A built-in `purchase_quote` profile provides the first supplier-quotation workflow.
+
 ## Features
 
 - **Smart classification** — Detect TextBased, Scanned, ImageBased, or Mixed PDFs in ~10-50ms by sampling content streams. Returns a confidence score (0.0-1.0) and per-page OCR routing.

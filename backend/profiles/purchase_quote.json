@@ -1,0 +1,79 @@
+{
+  "id": "purchase_quote",
+  "name": "采购报价单",
+  "version": 2,
+  "fields": {
+    "supplier_name": {
+      "aliases": ["供应商", "报价单位", "Supplier", "Seller"],
+      "required": true
+    },
+    "quote_number": {
+      "aliases": ["报价编号", "报价单号", "Quote No", "Quotation Number"]
+    },
+    "quote_date": {
+      "aliases": ["报价日期", "Quote Date", "Quotation Date"],
+      "type": "date",
+      "required": true
+    },
+    "product_name": {
+      "aliases": ["产品名称", "品名", "物料名称", "Product Name", "Item"]
+    },
+    "quantity": {
+      "aliases": ["数量", "采购数量", "Quantity", "Qty"],
+      "type": "decimal",
+      "min_value": "0"
+    },
+    "unit_price": {
+      "aliases": ["单价", "含税单价", "Unit Price", "Price"],
+      "type": "decimal",
+      "min_value": "0"
+    },
+    "total_amount": {
+      "aliases": ["含税总额", "报价总额", "Grand Total", "Total Amount"],
+      "type": "decimal",
+      "required": true,
+      "min_value": "0"
+    },
+    "currency": {
+      "aliases": ["币种", "Currency"]
+    },
+    "contact_name": {
+      "aliases": ["联系人", "Contact"]
+    }
+  },
+  "tables": {
+    "line_items": {
+      "required": true,
+      "columns": {
+        "product_name": {
+          "aliases": ["产品名称", "品名", "物料名称", "Product Name", "Item"],
+          "required": true
+        },
+        "model": {
+          "aliases": ["规格型号", "型号", "Model", "Specification"]
+        },
+        "quantity": {
+          "aliases": ["数量", "采购数量", "Quantity", "Qty"],
+          "type": "decimal",
+          "required": true,
+          "min_value": "0"
+        },
+        "unit": {
+          "aliases": ["单位", "计量单位", "Unit"],
+          "type": "unit"
+        },
+        "unit_price": {
+          "aliases": ["单价", "含税单价", "Unit Price", "Price"],
+          "type": "decimal",
+          "required": true,
+          "min_value": "0"
+        },
+        "amount": {
+          "aliases": ["金额", "合计", "小计", "Amount", "Subtotal"],
+          "type": "decimal",
+          "min_value": "0"
+        }
+      }
+    }
+  }
+}
