@@ -9,11 +9,10 @@ import unicodedata
 from collections import Counter
 from dataclasses import dataclass
 
+from .advanced_retrieval import attach_parent_context, table_metadata
 
 _HEADING = re.compile(r"^(#{1,6})\s+(.+?)\s*$")
-_TABLE_SEPARATOR = re.compile(
-    r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$"
-)
+_TABLE_SEPARATOR = re.compile(r"^\s*\|?\s*:?-{3,}:?\s*(?:\|\s*:?-{3,}:?\s*)+\|?\s*$")
 
 
 @dataclass(frozen=True)
@@ -128,6 +127,12 @@ def _make_chunk(
         f"{kind}:{sequence}:{content_hash}"
     )
     plain_text = _plain_text(markdown)
+    metadata = {"sequence": sequence}
+    if kind == "table":
+        table = table_metadata(markdown)
+        metadata["table"] = table
+        if table.get("semantic_text"):
+            plain_text = table["semantic_text"]
     return {
         "id": hashlib.sha256(identity.encode("utf-8")).hexdigest()[:24],
         "kind": kind,
@@ -140,6 +145,7 @@ def _make_chunk(
         "char_count": len(markdown),
         "content_hash": content_hash,
         "source_occurrences": 1,
+        "metadata": metadata,
     }
 
 
@@ -165,9 +171,7 @@ def _normalized_margin(text: str) -> str:
 def _is_protected_margin_line(line: str) -> bool:
     """Keep structures whose removal could corrupt section or table semantics."""
     return bool(
-        _HEADING.match(line)
-        or _TABLE_SEPARATOR.match(line)
-        or line.count("|") >= 2
+        _HEADING.match(line) or _TABLE_SEPARATOR.match(line) or line.count("|") >= 2
     )
 
 
@@ -206,9 +210,7 @@ def _remove_repeated_margins(
         math.ceil(eligible_pages * config.repeated_margin_page_ratio),
     )
     repeated = {
-        normalized
-        for normalized, count in candidates.items()
-        if count >= threshold
+        normalized for normalized, count in candidates.items() if count >= threshold
     }
     if not repeated:
         return pages, 0, []
@@ -271,7 +273,7 @@ def _filter_and_deduplicate(
             accepted.append(chunk)
             continue
         duplicates += 1
-        original["pages"] = sorted(set([*original["pages"], *chunk["pages"]]))
+        original["pages"] = sorted({*original["pages"], *chunk["pages"]})
         original["page_start"] = min(original["pages"])
         original["page_end"] = max(original["pages"])
         original["source_occurrences"] += chunk["source_occurrences"]
@@ -328,33 +330,32 @@ def chunk_pages_with_report(
         raise ValueError("margin_lines must be positive")
 
     sorted_pages = sorted(pages)
-    cleaned_pages, removed_margin_lines, repeated_margins = (
-        _remove_repeated_margins(sorted_pages, config)
+    cleaned_pages, removed_margin_lines, repeated_margins = _remove_repeated_margins(
+        sorted_pages, config
     )
 
     chunks: list[dict] = []
     section_path: list[str] = []
     sequence = 0
+
+    def emit_pending(pending: list[str], page: int) -> None:
+        nonlocal sequence
+        if not pending:
+            return
+        combined = "\n\n".join(pending).strip()
+        pending.clear()
+        for piece in _split_long_text(combined, max_chars, overlap_chars):
+            sequence += 1
+            chunks.append(
+                _make_chunk(document_id, page, section_path, "text", piece, sequence)
+            )
+
     for page, markdown in cleaned_pages:
         pending: list[str] = []
 
-        def emit_pending() -> None:
-            nonlocal sequence
-            if not pending:
-                return
-            combined = "\n\n".join(pending).strip()
-            pending.clear()
-            for piece in _split_long_text(combined, max_chars, overlap_chars):
-                sequence += 1
-                chunks.append(
-                    _make_chunk(
-                        document_id, page, section_path, "text", piece, sequence
-                    )
-                )
-
         for block in _blocks(markdown):
             if block.kind == "heading":
-                emit_pending()
+                emit_pending(pending, page)
                 match = _HEADING.match(block.markdown)
                 assert match is not None
                 level = len(match.group(1))
@@ -362,7 +363,7 @@ def chunk_pages_with_report(
                 section_path[level - 1 :] = [title]
                 continue
             if block.kind == "table":
-                emit_pending()
+                emit_pending(pending, page)
                 for piece in _split_table(block.markdown, max_chars):
                     sequence += 1
                     chunks.append(
@@ -373,11 +374,12 @@ def chunk_pages_with_report(
                 continue
             candidate = "\n\n".join([*pending, block.markdown])
             if pending and len(candidate) > target_chars:
-                emit_pending()
+                emit_pending(pending, page)
             pending.append(block.markdown)
-        emit_pending()
+        emit_pending(pending, page)
     candidate_count = len(chunks)
     chunks, rejected, duplicate_count = _filter_and_deduplicate(chunks, config)
+    attach_parent_context(chunks, document_id)
     report = {
         "pages_processed": len(sorted_pages),
         "candidate_chunks": candidate_count,

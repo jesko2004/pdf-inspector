@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Protocol
 
+from .advanced_retrieval import table_matches
 from .config import Settings
 from .task_store import utc_now
 
@@ -44,6 +45,7 @@ class VectorSearchQuery:
     page_end: int | None = None
     kinds: tuple[str, ...] = ()
     section_path_prefix: tuple[str, ...] = ()
+    table_filters: tuple[tuple[str, str], ...] = ()
 
 
 @dataclass(frozen=True)
@@ -274,6 +276,9 @@ class SQLiteVectorStore:
                 : len(query.section_path_prefix)
             ] != list(query.section_path_prefix):
                 continue
+            metadata = json.loads(row["metadata_json"])
+            if not table_matches(metadata, query.table_filters):
+                continue
             embedding = [float(value) for value in json.loads(row["embedding_json"])]
             norm = math.sqrt(sum(value * value for value in embedding))
             if norm == 0 or len(embedding) != len(query.embedding):
@@ -295,7 +300,7 @@ class SQLiteVectorStore:
                     page_end=int(row["page_end"]),
                     section_path=section_path,
                     kind=row["kind"],
-                    metadata=json.loads(row["metadata_json"]),
+                    metadata=metadata,
                 )
             )
         hits.sort(key=lambda item: (-item.score, item.document_id, item.chunk_id))
@@ -504,9 +509,14 @@ class PgVectorStore:
         with self._connect() as connection:
             rows = connection.execute(
                 sql,
-                (vector, *parameters, query.min_score, query.top_k),
+                (
+                    vector,
+                    *parameters,
+                    query.min_score,
+                    query.top_k * (10 if query.table_filters else 1),
+                ),
             ).fetchall()
-        return [
+        hits = [
             VectorSearchHit(
                 chunk_id=row[0],
                 knowledge_base_id=row[1],
@@ -522,6 +532,9 @@ class PgVectorStore:
             )
             for row in rows
         ]
+        return [
+            hit for hit in hits if table_matches(hit.metadata, query.table_filters)
+        ][: query.top_k]
 
 
 def create_vector_store(settings: Settings) -> VectorStore:

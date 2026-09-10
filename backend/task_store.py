@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
+from .migrations import Migration, apply_migrations
+
 TERMINAL_STATUSES = {"ready", "needs_review", "failed"}
 RESULT_STATUSES = {"ready", "needs_review"}
 
@@ -71,6 +73,26 @@ class TaskStore:
             connection.execute(
                 "CREATE INDEX IF NOT EXISTS tasks_status_idx ON tasks(status, created_at)"
             )
+            apply_migrations(
+                connection,
+                "tasks",
+                (Migration(1, "baseline_task_schema", "SELECT 1;"),),
+            )
+
+    def count_active(self) -> int:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT COUNT(*) FROM tasks WHERE status IN ('queued', 'processing')"
+            ).fetchone()
+        assert row is not None
+        return int(row[0])
+
+    def status_counts(self) -> dict[str, int]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT status, COUNT(*) AS count FROM tasks GROUP BY status"
+            ).fetchall()
+        return {str(row["status"]): int(row["count"]) for row in rows}
 
     def create(self, row: dict[str, Any]) -> dict[str, Any]:
         now = utc_now()

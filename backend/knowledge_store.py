@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterator
 from uuid import uuid4
 
+from .migrations import Migration, apply_migrations
 from .task_store import utc_now
 
 DOCUMENT_STATUSES = {"queued", "indexing", "ready", "partial", "failed"}
@@ -34,6 +35,53 @@ class InvalidKnowledgeStateError(ValueError):
 
 class EmbeddingBatchNotFoundError(KeyError):
     pass
+
+
+class KnowledgeAnswerNotFoundError(KeyError):
+    pass
+
+
+ADVANCED_RETRIEVAL_MIGRATION = Migration(
+    2,
+    "advanced_retrieval_versions_and_feedback",
+    """
+    ALTER TABLE knowledge_documents ADD COLUMN logical_document_key TEXT;
+    ALTER TABLE knowledge_documents ADD COLUMN version TEXT;
+    ALTER TABLE knowledge_documents ADD COLUMN effective_from TEXT;
+    ALTER TABLE knowledge_documents ADD COLUMN effective_to TEXT;
+    ALTER TABLE knowledge_documents ADD COLUMN is_current INTEGER NOT NULL DEFAULT 1;
+    UPDATE knowledge_documents
+       SET logical_document_key = document_key,
+           version = COALESCE(version, '1')
+     WHERE logical_document_key IS NULL;
+    ALTER TABLE knowledge_chunks ADD COLUMN metadata_json TEXT NOT NULL DEFAULT '{}';
+    CREATE INDEX IF NOT EXISTS knowledge_documents_version_idx
+        ON knowledge_documents(knowledge_base_id, logical_document_key, is_current);
+    CREATE TABLE IF NOT EXISTS rag_answers (
+        id TEXT PRIMARY KEY,
+        knowledge_base_id TEXT NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+        question TEXT NOT NULL,
+        answer TEXT NOT NULL,
+        refused INTEGER NOT NULL,
+        citations_json TEXT NOT NULL,
+        retrieval_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS answer_feedback (
+        id TEXT PRIMARY KEY,
+        answer_id TEXT NOT NULL REFERENCES rag_answers(id) ON DELETE CASCADE,
+        knowledge_base_id TEXT NOT NULL REFERENCES knowledge_bases(id) ON DELETE CASCADE,
+        helpful INTEGER NOT NULL,
+        valid_citation_ids_json TEXT NOT NULL,
+        invalid_citation_ids_json TEXT NOT NULL,
+        correction TEXT,
+        comment TEXT,
+        created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS answer_feedback_kb_idx
+        ON answer_feedback(knowledge_base_id, created_at);
+    """,
+)
 
 
 def _chunk_key(chunk: dict[str, Any]) -> str:
@@ -168,6 +216,21 @@ class KnowledgeStore:
                     ON embedding_batches(status, created_at);
                 """
             )
+            apply_migrations(
+                connection,
+                "knowledge",
+                (
+                    Migration(1, "baseline_knowledge_schema", "SELECT 1;"),
+                    ADVANCED_RETRIEVAL_MIGRATION,
+                ),
+            )
+
+    def batch_status_counts(self) -> dict[str, int]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT status, COUNT(*) AS count FROM embedding_batches GROUP BY status"
+            ).fetchall()
+        return {str(row["status"]): int(row["count"]) for row in rows}
 
     def create_knowledge_base(
         self,
@@ -297,6 +360,51 @@ class KnowledgeStore:
             ).fetchall()
         return [self._public_document(dict(row)) for row in rows]
 
+    def eligible_document_ids(
+        self,
+        knowledge_base_id: str,
+        *,
+        document_ids: list[str],
+        versions: list[str],
+        as_of: str | None,
+        include_historical: bool,
+    ) -> list[str]:
+        self.get_knowledge_base(knowledge_base_id)
+        where = ["knowledge_base_id = ?"]
+        parameters: list[Any] = [knowledge_base_id]
+        if document_ids:
+            placeholders = ",".join("?" for _ in document_ids)
+            where.append(f"id IN ({placeholders})")
+            parameters.extend(document_ids)
+        if versions:
+            placeholders = ",".join("?" for _ in versions)
+            where.append(f"version IN ({placeholders})")
+            parameters.extend(versions)
+        if as_of is not None:
+            where.extend(
+                [
+                    "(effective_from IS NULL OR effective_from <= ?)",
+                    "(effective_to IS NULL OR effective_to > ?)",
+                ]
+            )
+            parameters.extend([as_of, as_of])
+        elif not include_historical:
+            now = utc_now()
+            where.extend(
+                [
+                    "is_current = 1",
+                    "(effective_from IS NULL OR effective_from <= ?)",
+                    "(effective_to IS NULL OR effective_to > ?)",
+                ]
+            )
+            parameters.extend([now, now])
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id FROM knowledge_documents WHERE " + " AND ".join(where),
+                parameters,
+            ).fetchall()
+        return [str(row["id"]) for row in rows]
+
     def has_active_documents(self, knowledge_base_id: str) -> bool:
         with self._connect() as connection:
             row = connection.execute(
@@ -311,6 +419,9 @@ class KnowledgeStore:
 
     @staticmethod
     def _public_document(row: dict[str, Any]) -> dict[str, Any]:
+        row["storage_document_key"] = row["document_key"]
+        row["document_key"] = row.get("logical_document_key") or row["document_key"]
+        row["is_current"] = bool(row.get("is_current", 1))
         total = int(row["total_chunks"])
         completed = int(row["indexed_chunks"]) + int(row["failed_chunks"])
         row["progress"] = 100 if total == 0 else round(completed * 100 / total)
@@ -336,6 +447,7 @@ class KnowledgeStore:
     def _public_chunk(row: dict[str, Any]) -> dict[str, Any]:
         row["pages"] = json.loads(row.pop("pages_json"))
         row["section_path"] = json.loads(row.pop("section_path_json"))
+        row["metadata"] = json.loads(row.pop("metadata_json", "{}"))
         return row
 
     def list_batches(self, document_id: str) -> list[dict[str, Any]]:
@@ -364,6 +476,10 @@ class KnowledgeStore:
         chunk_set_hash: str,
         chunks: list[dict[str, Any]],
         batch_size: int,
+        version: str | None = None,
+        effective_from: str | None = None,
+        effective_to: str | None = None,
+        preserve_history: bool = False,
     ) -> tuple[dict[str, Any], list[str], list[str], bool]:
         knowledge_base = self.get_knowledge_base(knowledge_base_id)
         now = utc_now()
@@ -377,7 +493,8 @@ class KnowledgeStore:
             ).fetchone()
             current_row = connection.execute(
                 "SELECT * FROM knowledge_documents "
-                "WHERE knowledge_base_id = ? AND document_key = ?",
+                "WHERE knowledge_base_id = ? AND logical_document_key = ? "
+                "AND is_current = 1",
                 (knowledge_base_id, document_key),
             ).fetchone()
             if (
@@ -400,6 +517,32 @@ class KnowledgeStore:
                     "cannot replace a document while indexing is active"
                 )
 
+            if (
+                current_row is not None
+                and preserve_history
+                and current_row["content_hash"] != content_hash
+            ):
+                archived_key = (
+                    f"{document_key}@{current_row['version'] or '1'}:"
+                    f"{current_row['id'][:8]}"
+                )
+                connection.execute(
+                    """
+                    UPDATE knowledge_documents
+                       SET document_key = ?, is_current = 0,
+                           effective_to = COALESCE(effective_to, ?, ?), updated_at = ?
+                     WHERE id = ?
+                    """,
+                    (
+                        archived_key,
+                        effective_from,
+                        now,
+                        now,
+                        current_row["id"],
+                    ),
+                )
+                current_row = None
+
             if current_row is None:
                 document_id = str(uuid4())
                 generation = 1
@@ -409,8 +552,9 @@ class KnowledgeStore:
                     INSERT INTO knowledge_documents (
                         id, knowledge_base_id, task_id, document_key, filename,
                         content_hash, chunk_set_hash, status, generation,
-                        created_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?)
+                        logical_document_key, version, effective_from, effective_to,
+                        is_current, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'queued', ?, ?, ?, ?, ?, 1, ?, ?)
                     """,
                     (
                         document_id,
@@ -421,6 +565,10 @@ class KnowledgeStore:
                         content_hash,
                         chunk_set_hash,
                         generation,
+                        document_key,
+                        version or "1",
+                        effective_from,
+                        effective_to,
                         now,
                         now,
                     ),
@@ -488,6 +636,7 @@ class KnowledgeStore:
                     int(chunk.get("page_end", chunk.get("page_start", 1))),
                     json.dumps(chunk.get("pages", [chunk.get("page_start", 1)])),
                     json.dumps(chunk.get("section_path", []), ensure_ascii=False),
+                    json.dumps(chunk.get("metadata", {}), ensure_ascii=False),
                     status,
                     knowledge_base["embedding_provider"],
                     knowledge_base["embedding_model"],
@@ -500,9 +649,9 @@ class KnowledgeStore:
                         INSERT INTO knowledge_chunks (
                             id, document_id, source_chunk_id, chunk_key, content_hash,
                             kind, markdown, text, page_start, page_end, pages_json,
-                            section_path_json, status, embedding_provider,
+                            section_path_json, metadata_json, status, embedding_provider,
                             embedding_model, embedding_dimensions, created_at, updated_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (chunk_id, document_id, *values, now),
                     )
@@ -513,7 +662,7 @@ class KnowledgeStore:
                            SET source_chunk_id = ?, chunk_key = ?, content_hash = ?,
                                kind = ?, markdown = ?, text = ?, page_start = ?,
                                page_end = ?, pages_json = ?, section_path_json = ?,
-                               status = ?, embedding_provider = ?, embedding_model = ?,
+                               metadata_json = ?, status = ?, embedding_provider = ?, embedding_model = ?,
                                embedding_dimensions = ?, error_code = NULL,
                                error_message = NULL, updated_at = ?
                          WHERE id = ?
@@ -540,7 +689,9 @@ class KnowledgeStore:
                        status = ?,
                        generation = ?, total_chunks = ?, indexed_chunks = ?,
                        failed_chunks = 0, error_code = NULL, error_message = NULL,
-                       indexed_at = ?, updated_at = ?
+                       indexed_at = ?, version = COALESCE(?, version),
+                       effective_from = COALESCE(?, effective_from),
+                       effective_to = COALESCE(?, effective_to), updated_at = ?
                  WHERE id = ?
                 """,
                 (
@@ -553,6 +704,9 @@ class KnowledgeStore:
                     len(incoming),
                     indexed_count,
                     indexed_at,
+                    version,
+                    effective_from,
+                    effective_to,
                     now,
                     document_id,
                 ),
@@ -571,6 +725,187 @@ class KnowledgeStore:
                 (limit,),
             ).fetchall()
         return [row["chunk_id"] for row in rows]
+
+    def record_answer(self, answer: dict[str, Any]) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                """
+                INSERT OR REPLACE INTO rag_answers(
+                    id, knowledge_base_id, question, answer, refused,
+                    citations_json, retrieval_json, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    answer["answer_id"],
+                    answer["knowledge_base_id"],
+                    answer["question"],
+                    answer["answer"],
+                    int(answer["refused"]),
+                    json.dumps(answer["citations"], ensure_ascii=False),
+                    json.dumps(answer["retrieval"], ensure_ascii=False),
+                    utc_now(),
+                ),
+            )
+
+    def create_feedback(
+        self, knowledge_base_id: str, payload: dict[str, Any]
+    ) -> dict[str, Any]:
+        feedback_id = str(uuid4())
+        now = utc_now()
+        with self._connect() as connection:
+            answer = connection.execute(
+                "SELECT * FROM rag_answers WHERE id = ? AND knowledge_base_id = ?",
+                (payload["answer_id"], knowledge_base_id),
+            ).fetchone()
+            if answer is None:
+                raise KnowledgeAnswerNotFoundError(payload["answer_id"])
+            citation_ids = {
+                citation.get("chunk_id")
+                for citation in json.loads(answer["citations_json"])
+            }
+            supplied = set(payload.get("valid_citation_ids", [])).union(
+                payload.get("invalid_citation_ids", [])
+            )
+            if not supplied.issubset(citation_ids):
+                raise ValueError(
+                    "feedback contains citation IDs not used by the answer"
+                )
+            connection.execute(
+                """
+                INSERT INTO answer_feedback(
+                    id, answer_id, knowledge_base_id, helpful,
+                    valid_citation_ids_json, invalid_citation_ids_json,
+                    correction, comment, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    feedback_id,
+                    payload["answer_id"],
+                    knowledge_base_id,
+                    int(payload["helpful"]),
+                    json.dumps(payload.get("valid_citation_ids", [])),
+                    json.dumps(payload.get("invalid_citation_ids", [])),
+                    payload.get("correction"),
+                    payload.get("comment"),
+                    now,
+                ),
+            )
+        return self.get_feedback(feedback_id)
+
+    def get_feedback(self, feedback_id: str) -> dict[str, Any]:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT * FROM answer_feedback WHERE id = ?", (feedback_id,)
+            ).fetchone()
+        if row is None:
+            raise KeyError(feedback_id)
+        item = dict(row)
+        item["helpful"] = bool(item["helpful"])
+        item["valid_citation_ids"] = json.loads(item.pop("valid_citation_ids_json"))
+        item["invalid_citation_ids"] = json.loads(item.pop("invalid_citation_ids_json"))
+        return item
+
+    def list_feedback(
+        self, knowledge_base_id: str, limit: int, offset: int
+    ) -> list[dict[str, Any]]:
+        self.get_knowledge_base(knowledge_base_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id FROM answer_feedback WHERE knowledge_base_id = ? "
+                "ORDER BY created_at DESC LIMIT ? OFFSET ?",
+                (knowledge_base_id, limit, offset),
+            ).fetchall()
+        return [self.get_feedback(row["id"]) for row in rows]
+
+    def feedback_summary(
+        self,
+        knowledge_base_id: str,
+        *,
+        created_from: str | None = None,
+        created_to: str | None = None,
+    ) -> dict[str, Any]:
+        self.get_knowledge_base(knowledge_base_id)
+        where = ["f.knowledge_base_id = ?"]
+        parameters: list[Any] = [knowledge_base_id]
+        if created_from is not None:
+            where.append("f.created_at >= ?")
+            parameters.append(created_from)
+        if created_to is not None:
+            where.append("f.created_at < ?")
+            parameters.append(created_to)
+        with self._connect() as connection:
+            row = connection.execute(
+                f"""
+                SELECT COUNT(*) AS total,
+                       SUM(helpful) AS helpful,
+                       SUM(json_array_length(valid_citation_ids_json)) AS valid_citations,
+                       SUM(json_array_length(invalid_citation_ids_json)) AS invalid_citations,
+                       SUM(a.refused) AS refusals
+                  FROM answer_feedback f
+                  JOIN rag_answers a ON a.id = f.answer_id
+                 WHERE {" AND ".join(where)}
+                """,
+                parameters,
+            ).fetchone()
+        assert row is not None
+        total = int(row["total"] or 0)
+        valid = int(row["valid_citations"] or 0)
+        invalid = int(row["invalid_citations"] or 0)
+        return {
+            "knowledge_base_id": knowledge_base_id,
+            "created_from": created_from,
+            "created_to": created_to,
+            "feedback_count": total,
+            "helpful_rate": round(int(row["helpful"] or 0) / total, 6)
+            if total
+            else None,
+            "citation_precision": round(valid / (valid + invalid), 6)
+            if valid + invalid
+            else None,
+            "refusal_rate": round(int(row["refusals"] or 0) / total, 6)
+            if total
+            else None,
+        }
+
+    def feedback_evaluation_cases(self, knowledge_base_id: str) -> list[dict[str, Any]]:
+        from .advanced_retrieval import redact_feedback_text
+
+        self.get_knowledge_base(knowledge_base_id)
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT f.*, a.question, a.citations_json
+                  FROM answer_feedback f
+                  JOIN rag_answers a ON a.id = f.answer_id
+                 WHERE f.knowledge_base_id = ? AND f.helpful = 1
+              ORDER BY f.created_at, f.id
+                """,
+                (knowledge_base_id,),
+            ).fetchall()
+        cases = []
+        for row in rows:
+            valid_ids = set(json.loads(row["valid_citation_ids_json"]))
+            expected = []
+            for citation in json.loads(row["citations_json"]):
+                if citation.get("chunk_id") not in valid_ids:
+                    continue
+                source = {
+                    "document_id": citation["document_id"],
+                    "pages": citation.get("pages", []),
+                }
+                if source not in expected:
+                    expected.append(source)
+            if not expected:
+                continue
+            cases.append(
+                {
+                    "id": f"feedback-{row['id']}",
+                    "query": redact_feedback_text(row["question"]),
+                    "expected_sources": expected,
+                    "expected_answer": redact_feedback_text(row["correction"] or ""),
+                }
+            )
+        return cases
 
     def complete_vector_deletions(self, chunk_ids: list[str]) -> None:
         if not chunk_ids:

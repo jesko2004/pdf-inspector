@@ -3,13 +3,23 @@
 from __future__ import annotations
 
 import json
+import logging
+import re
 from contextlib import asynccontextmanager
+from datetime import datetime
 from functools import partial
+from time import perf_counter
 from typing import Annotated
+from uuid import uuid4
 
 try:
-    from fastapi import FastAPI, File, Form, HTTPException, Query, UploadFile
-    from fastapi.responses import FileResponse, Response, StreamingResponse
+    from fastapi import FastAPI, File, Form, HTTPException, Query, Request, UploadFile
+    from fastapi.responses import (
+        FileResponse,
+        JSONResponse,
+        Response,
+        StreamingResponse,
+    )
 except ImportError as exc:
     raise RuntimeError(
         "backend dependencies are missing; install with `pip install -e '.[backend]'`"
@@ -23,18 +33,27 @@ from .knowledge_models import (
     KnowledgeBaseReindex,
     KnowledgeBaseUpdate,
     KnowledgeDocumentIngest,
+    KnowledgeFeedbackCreate,
     KnowledgeRetrievalEvaluationRequest,
     KnowledgeSearchRequest,
+    normalize_aware_datetime,
 )
-from .knowledge_service import EmbeddingFactory, KnowledgeService
+from .knowledge_service import EmbeddingFactory, KnowledgeService, RerankerFactory
 from .knowledge_store import (
     InvalidKnowledgeStateError,
+    KnowledgeAnswerNotFoundError,
     KnowledgeBaseNotFoundError,
     KnowledgeConflictError,
     KnowledgeDocumentNotFoundError,
     KnowledgeStore,
 )
 from .llm import LlmError
+from .observability import (
+    AuditStore,
+    MetricsRegistry,
+    SlidingWindowRateLimiter,
+    json_log,
+)
 from .ocr import create_ocr_provider
 from .processor import process_document
 from .profile_store import (
@@ -44,7 +63,19 @@ from .profile_store import (
 )
 from .profiles import Profile
 from .rag_service import LlmFactory, RagService
-from .service import Processor, ResultNotReadyError, TaskService, UploadValidationError
+from .security import (
+    ApiKeyAuthenticator,
+    Principal,
+    has_permission,
+    required_permission,
+)
+from .service import (
+    CapacityExceededError,
+    Processor,
+    ResultNotReadyError,
+    TaskService,
+    UploadValidationError,
+)
 from .table_data import table_to_csv
 from .task_store import InvalidTaskStateError, TaskNotFoundError
 from .vector_store import VectorStore, create_vector_store
@@ -55,18 +86,24 @@ def create_app(
     *,
     processor: Processor | None = None,
     embedding_factory: EmbeddingFactory | None = None,
+    reranker_factory: RerankerFactory | None = None,
     llm_factory: LlmFactory | None = None,
     vector_store: VectorStore | None = None,
     start_workers: bool = True,
 ) -> FastAPI:
     settings = settings or Settings.from_env()
+    metrics = MetricsRegistry()
+    audit = AuditStore(settings.audit_database_path)
+    authenticator = ApiKeyAuthenticator(settings.api_keys)
+    rate_limiter = SlidingWindowRateLimiter()
     configured_processor = processor or partial(
-        process_document, ocr_provider=create_ocr_provider(settings)
+        process_document, ocr_provider=create_ocr_provider(settings), metrics=metrics
     )
     service = TaskService(
         settings,
         processor=configured_processor,
         start_workers=start_workers,
+        metrics=metrics,
     )
     knowledge = KnowledgeService(
         settings,
@@ -74,7 +111,9 @@ def create_app(
         KnowledgeStore(settings.knowledge_database_path),
         vector_store or create_vector_store(settings),
         embedding_factory=embedding_factory,
+        reranker_factory=reranker_factory,
         start_workers=start_workers,
+        metrics=metrics,
     )
     rag = RagService(settings, knowledge, llm_factory=llm_factory)
 
@@ -93,10 +132,155 @@ def create_app(
     app.state.service = service
     app.state.knowledge = knowledge
     app.state.rag = rag
+    app.state.metrics = metrics
+    app.state.audit = audit
+
+    @app.middleware("http")
+    async def production_controls(request: Request, call_next):
+        started = perf_counter()
+        supplied_request_id = request.headers.get("x-request-id", "")
+        request_id = (
+            supplied_request_id
+            if re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", supplied_request_id)
+            else str(uuid4())
+        )
+        required = required_permission(request.method, request.url.path)
+        principal = Principal("anonymous", "admin")
+        if authenticator.enabled and required is not None:
+            principal = authenticator.authenticate(
+                authenticator.extract(request.headers)
+            )
+            if principal is None:
+                response = JSONResponse(
+                    {"detail": "missing_or_invalid_api_key", "request_id": request_id},
+                    status_code=401,
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+                _record_request(
+                    request, response.status_code, request_id, None, started, required
+                )
+                response.headers["X-Request-ID"] = request_id
+                return response
+            if not has_permission(principal, required):
+                response = JSONResponse(
+                    {"detail": "insufficient_permission", "request_id": request_id},
+                    status_code=403,
+                )
+                _record_request(
+                    request,
+                    response.status_code,
+                    request_id,
+                    principal,
+                    started,
+                    required,
+                )
+                response.headers["X-Request-ID"] = request_id
+                return response
+        request.state.principal = principal
+        bucket = None
+        limit = 0
+        if request.url.path.endswith("/ask"):
+            bucket, limit = "ask", settings.ask_rate_limit_per_minute
+        elif request.url.path.endswith("/search"):
+            bucket, limit = "search", settings.search_rate_limit_per_minute
+        if bucket:
+            client_ip = request.client.host if request.client else "unknown"
+            identity = principal.key_id if authenticator.enabled else client_ip
+            allowed, retry_after = rate_limiter.allow(identity, bucket, limit)
+            if not allowed:
+                metrics.increment(
+                    "pdf_inspector_rate_limit_rejections_total", bucket=bucket
+                )
+                response = JSONResponse(
+                    {"detail": "rate_limit_exceeded", "request_id": request_id},
+                    status_code=429,
+                    headers={"Retry-After": str(retry_after)},
+                )
+                _record_request(
+                    request,
+                    response.status_code,
+                    request_id,
+                    principal,
+                    started,
+                    required,
+                )
+                response.headers["X-Request-ID"] = request_id
+                return response
+        try:
+            response = await call_next(request)
+        except Exception:
+            _record_request(request, 500, request_id, principal, started, required)
+            raise
+        response.headers["X-Request-ID"] = request_id
+        _record_request(
+            request, response.status_code, request_id, principal, started, required
+        )
+        return response
+
+    def _record_request(
+        request: Request,
+        status_code: int,
+        request_id: str,
+        principal: Principal | None,
+        started: float,
+        required: str | None,
+    ) -> None:
+        duration = perf_counter() - started
+        route = request.scope.get("route")
+        path = getattr(route, "path", request.url.path)
+        metrics.increment(
+            "pdf_inspector_http_requests_total",
+            method=request.method,
+            path=path,
+            status=str(status_code),
+        )
+        metrics.observe(
+            "http_request", duration, "error" if status_code >= 400 else "success"
+        )
+        logging.getLogger("uvicorn.access").info(
+            json_log(
+                request_id=request_id,
+                actor_id=principal.key_id if principal else "unauthenticated",
+                method=request.method,
+                path=path,
+                status_code=status_code,
+                duration_ms=round(duration * 1000, 3),
+            )
+        )
+        if required in {"write", "admin"} or status_code in {401, 403}:
+            audit.record(
+                request_id=request_id,
+                actor_id=principal.key_id if principal else "unauthenticated",
+                actor_role=principal.role if principal else None,
+                method=request.method,
+                path=path,
+                status_code=status_code,
+                duration_ms=duration * 1000,
+                client_ip=request.client.host if request.client else None,
+            )
 
     @app.get("/health")
     def health() -> dict:
         return {"status": "ok"}
+
+    @app.get("/metrics", response_class=Response)
+    def prometheus_metrics() -> Response:
+        for status in ("queued", "processing", "ready", "needs_review", "failed"):
+            metrics.set_gauge("pdf_inspector_tasks", 0, status=status)
+        for status, count in service.tasks.status_counts().items():
+            metrics.set_gauge("pdf_inspector_tasks", count, status=status)
+        for status in ("queued", "processing", "completed", "failed"):
+            metrics.set_gauge("pdf_inspector_embedding_batches", 0, status=status)
+        for status, count in knowledge.store.batch_status_counts().items():
+            metrics.set_gauge("pdf_inspector_embedding_batches", count, status=status)
+        return Response(metrics.render(), media_type="text/plain; version=0.0.4")
+
+    @app.get("/v1/audit-events")
+    def list_audit_events(
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict:
+        return {"items": audit.list(limit, offset), "limit": limit, "offset": offset}
 
     @app.get("/v1/profiles")
     def list_profiles() -> dict:
@@ -154,6 +338,13 @@ def create_app(
                 page_end=payload.page_end,
                 kinds=payload.kinds,
                 section_path_prefix=payload.section_path_prefix,
+                table_filters=payload.table_filters,
+                rewrite_query=payload.rewrite_query,
+                max_query_variants=payload.max_query_variants,
+                rerank=payload.rerank,
+                include_historical=payload.include_historical,
+                versions=payload.versions,
+                as_of=payload.as_of.isoformat() if payload.as_of else None,
             )
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(
@@ -177,6 +368,15 @@ def create_app(
                 page_end=payload.page_end,
                 kinds=payload.kinds,
                 section_path_prefix=payload.section_path_prefix,
+                table_filters=payload.table_filters,
+                rewrite_query=payload.rewrite_query,
+                max_query_variants=payload.max_query_variants,
+                compare_rewrite=payload.compare_rewrite,
+                rerank=payload.rerank,
+                compare_rerank=payload.compare_rerank,
+                include_historical=payload.include_historical,
+                versions=payload.versions,
+                as_of=payload.as_of.isoformat() if payload.as_of else None,
             )
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(
@@ -188,6 +388,28 @@ def create_app(
     @app.post("/v1/knowledge-bases/{knowledge_base_id}/ask")
     def ask_knowledge_base(knowledge_base_id: str, payload: KnowledgeAskRequest):
         try:
+            if (
+                payload.max_context_tokens is not None
+                and payload.max_context_tokens > settings.rag_max_context_tokens
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "context_token_limit_exceeded",
+                        "maximum": settings.rag_max_context_tokens,
+                    },
+                )
+            if (
+                payload.max_output_tokens is not None
+                and payload.max_output_tokens > settings.rag_max_output_tokens
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail={
+                        "code": "output_token_limit_exceeded",
+                        "maximum": settings.rag_max_output_tokens,
+                    },
+                )
             prepared = rag.prepare(
                 knowledge_base_id,
                 payload.question,
@@ -198,15 +420,54 @@ def create_app(
                 page_end=payload.page_end,
                 kinds=payload.kinds,
                 section_path_prefix=payload.section_path_prefix,
+                table_filters=payload.table_filters,
+                rewrite_query=payload.rewrite_query,
+                max_query_variants=payload.max_query_variants,
+                rerank=payload.rerank,
+                include_historical=payload.include_historical,
+                versions=payload.versions,
+                as_of=payload.as_of.isoformat() if payload.as_of else None,
                 max_context_tokens=payload.max_context_tokens,
                 max_output_tokens=payload.max_output_tokens,
             )
             if not payload.stream:
-                return rag.answer(prepared)
+                answer = rag.answer(prepared)
+                metrics.observe(
+                    "llm_generation", answer["generation_latency_ms"] / 1000
+                )
+                if answer["refused"]:
+                    metrics.increment("pdf_inspector_rag_refusals_total")
+                for token_kind, count in answer["usage"].items():
+                    if isinstance(count, int):
+                        metrics.increment(
+                            "pdf_inspector_llm_tokens_total",
+                            count,
+                            token_kind=token_kind,
+                        )
+                knowledge.store.record_answer(answer)
+                return answer
 
             def event_stream():
                 try:
                     for event in rag.stream(prepared):
+                        if event["event"] == "done":
+                            metrics.observe(
+                                "llm_generation",
+                                event["data"]["generation_latency_ms"] / 1000,
+                            )
+                            if prepared.refused:
+                                metrics.increment("pdf_inspector_rag_refusals_total")
+                            knowledge.store.record_answer(
+                                {
+                                    "answer_id": prepared.answer_id,
+                                    "knowledge_base_id": prepared.knowledge_base_id,
+                                    "question": prepared.question,
+                                    "answer": event["data"]["answer"],
+                                    "refused": prepared.refused,
+                                    "citations": prepared.citations,
+                                    "retrieval": prepared.retrieval,
+                                }
+                            )
                         yield (
                             f"event: {event['event']}\n"
                             f"data: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
@@ -228,6 +489,79 @@ def create_app(
             ) from exc
         except (EmbeddingError, LlmError, ValueError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/v1/knowledge-bases/{knowledge_base_id}/feedback", status_code=201)
+    def create_answer_feedback(
+        knowledge_base_id: str, payload: KnowledgeFeedbackCreate
+    ) -> dict:
+        try:
+            return knowledge.store.create_feedback(
+                knowledge_base_id, payload.model_dump(mode="json")
+            )
+        except KnowledgeAnswerNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="answer_not_found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/feedback")
+    def list_answer_feedback(
+        knowledge_base_id: str,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict:
+        try:
+            return {
+                "items": knowledge.store.list_feedback(
+                    knowledge_base_id, limit, offset
+                ),
+                "limit": limit,
+                "offset": offset,
+            }
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/feedback/summary")
+    def summarize_answer_feedback(
+        knowledge_base_id: str,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+    ) -> dict:
+        try:
+            try:
+                created_from = normalize_aware_datetime(created_from)
+                created_to = normalize_aware_datetime(created_to)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if (
+                created_from is not None
+                and created_to is not None
+                and created_from >= created_to
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="created_from must be earlier than created_to",
+                )
+            return knowledge.store.feedback_summary(
+                knowledge_base_id,
+                created_from=created_from.isoformat() if created_from else None,
+                created_to=created_to.isoformat() if created_to else None,
+            )
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/feedback/evaluation-cases")
+    def export_feedback_evaluation_cases(knowledge_base_id: str) -> dict:
+        try:
+            items = knowledge.store.feedback_evaluation_cases(knowledge_base_id)
+            return {"items": items, "count": len(items), "redacted": True}
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
 
     @app.patch("/v1/knowledge-bases/{knowledge_base_id}")
     def update_knowledge_base(
@@ -271,7 +605,20 @@ def create_app(
     ) -> dict:
         try:
             return knowledge.ingest_task(
-                knowledge_base_id, payload.task_id, payload.document_key
+                knowledge_base_id,
+                payload.task_id,
+                payload.document_key,
+                version=payload.version,
+                effective_from=(
+                    payload.effective_from.isoformat()
+                    if payload.effective_from is not None
+                    else None
+                ),
+                effective_to=(
+                    payload.effective_to.isoformat()
+                    if payload.effective_to is not None
+                    else None
+                ),
             )
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(
@@ -437,6 +784,8 @@ def create_app(
             raise HTTPException(status_code=404, detail="profile_not_found") from exc
         except UploadValidationError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except CapacityExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
 
     @app.get("/v1/tasks")
     def list_tasks(
