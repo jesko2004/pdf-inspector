@@ -36,7 +36,7 @@ BM25、多租户、分布式队列、对象存储与真实模型接入不作为�
 
 35 个待提交文件、复现材料及 [GitHub 标题、描述与中文总结](github-closeout-draft.md) 已整理。本地基线为 `42c8faa874820b77a9a9c73efa87e4e9ae382598`；实时核实远程 main 为 `faca8a36742d6fa516529df81dcb99ac70947aae`，仅增加已合并 PR #11 的提交，文件差异为空。现有功能验证不因该合并失效，正式发布前仍需刷新目标分支。
 
-本文记录收尾提交的验收依据；本地提交及发布动作按路径 B 执行。发布检查发现 GitHub CLI 登录凭据无效（401），连接器返回目标仓库 `push: false`，Git HTTPS 刷新曾连接超时。尚无 PR 链接；实际提交号及发布结果另记本机交付记录，不把准备完成当成已发布。
+路径 B 已完成提交、推送与 PR 创建。修复提交为 `00429a3521c851c4cee7a22a0dcd3dcf56af6bd0`，分支为 `codex/offline-acceptance-closeout`，目标为 `main`。已创建 [PR #12](https://github.com/jesko2004/pdf-inspector/pull/12)，35 个文件范围核对一致；PR 尚未合并，也未发布软件版本。GitHub CI 状态以 PR 页面为准，本地验收不等同于云端 CI 已通过。
 
 复现方法见 [离线验收复现说明](acceptance-reproduction.md)，修复细节见 [后续修复报告](acceptance-deferred-fixes.md)。原始业务 PDF、独立测试数据库、访问密钥及无关简历文件不纳入交付。
 

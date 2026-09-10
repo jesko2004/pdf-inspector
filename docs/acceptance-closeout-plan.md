@@ -1,6 +1,6 @@
 # 基本验收与 GitHub 收尾方案
 
-日期：2026-09-10。状态：第一阶段已完成并复测，见 [第一阶段报告](acceptance-stage1-report.md)；第二阶段范围冻结及文档同步已完成，见 [交付范围与已知限制](acceptance-scope.md)。第三阶段已完成；第四阶段复现材料和发布文案已准备，本次外部提交例外已获批准，本材料随本地收尾提交保存；远程发布状态见最终报告。依据 acceptance-report.md 和 acceptance-review-findings.md；不要将本方案的目标写成已完成事实。
+日期：2026-09-10。状态：第一阶段已完成并复测，见 [第一阶段报告](acceptance-stage1-report.md)；第二阶段范围冻结及文档同步已完成，见 [交付范围与已知限制](acceptance-scope.md)。第三阶段已完成；第四阶段复现材料和发布文案已准备，本次外部提交例外已获批准，本材料已随收尾提交推送，并创建 [PR #12](https://github.com/jesko2004/pdf-inspector/pull/12)；尚未合并或发布版本。依据 acceptance-report.md 和 acceptance-review-findings.md；不要将本方案的目标写成已完成事实。
 
 后续更新：用户要求尽可能修复暂缓内容后，已补齐 Q-04 的受限本地封面路径、标题重复绘制去重及中文换行连接，并重建候选复测。最新证据见 [后续修复报告](acceptance-deferred-fixes.md)；第一阶段测试与产物只作历史基线。
 
