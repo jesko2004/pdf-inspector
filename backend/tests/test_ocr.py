@@ -100,6 +100,91 @@ class OcrTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "exceed"):
             provider.extract_pages(Path("sample.pdf"), [2])
 
+    def test_cover_selection_requires_displayed_image_and_only_marginal_text(self):
+        rect = SimpleNamespace(x0=0, y0=0, x1=600, y1=800, width=600, height=800)
+        spans = [{'text': 'example.org', 'bbox': (440, 760, 580, 780)}]
+        images = [{'bbox': (0, 0, 600, 800)}]
+        page = SimpleNamespace(
+            rotation=0, cropbox=(0, 0, 600, 800), mediabox=(0, 0, 600, 800), rect=rect,
+            get_text=lambda *_a, **_k: {'blocks': [{'type': 0, 'lines': [{'spans': spans}]}]},
+            get_image_info=lambda: images,
+        )
+        self.assertEqual([(440, 760, 580, 780)], RapidOcrProvider._cover_native_boxes(page))
+        spans.append({'text': 'Central body paragraph', 'bbox': (50, 300, 400, 330)})
+        self.assertEqual([], RapidOcrProvider._cover_native_boxes(page))
+        spans.pop()
+        images[0]['bbox'] = (0, 0, 50, 50)  # a small displayed logo is not a cover
+        self.assertEqual([], RapidOcrProvider._cover_native_boxes(page))
+        images[0]['bbox'] = (1000, 1000, 1600, 1800)  # large but outside the page
+        self.assertEqual([], RapidOcrProvider._cover_native_boxes(page))
+        images[0]['bbox'] = (0, 0, 600, 800)
+        spans[0]['text'] = 'Many words ' * 30
+        self.assertEqual([], RapidOcrProvider._cover_native_boxes(page))
+        spans[0]['text'] = 'example.org'
+        page.rotation = 90
+        self.assertEqual([], RapidOcrProvider._cover_native_boxes(page))
+
+    def test_supplement_excludes_native_location_not_repeated_word_elsewhere(self):
+        output = SimpleNamespace(
+            boxes=[
+                [[10, 10], [80, 10], [80, 25], [10, 25]],
+                [[10, 100], [80, 100], [80, 115], [10, 115]],
+                [[10, 200], [200, 200], [200, 215], [10, 215]],
+            ],
+            txts=['PRINCE', 'PRINCE', 'PRINCE new image text'], scores=[0.99, 0.99, 0.99],
+        )
+        provider = RapidOcrProvider(engine=lambda *_a, **_k: output)
+        markdown, confidence = provider._recognize(
+            b'image', [(8, 98, 82, 117), (8, 198, 82, 217)]
+        )
+        self.assertEqual('PRINCE\n\nPRINCE new image text', markdown)
+        self.assertAlmostEqual(0.99, confidence)
+
+    def test_native_body_page_does_not_initialize_ocr_or_render(self):
+        page = SimpleNamespace(
+            rotation=0, cropbox=(0, 0, 600, 800), mediabox=(0, 0, 600, 800),
+            rect=SimpleNamespace(x0=0, y0=0, x1=600, y1=800, width=600, height=800),
+            get_text=lambda *_a, **_k: {'blocks': [{'type': 0, 'lines': [{'spans': [
+                {'text': 'Real body text', 'bbox': (50, 300, 400, 330)}
+            ]}]}]},
+        )
+        closed = []
+        doc = SimpleNamespace(page_count=1, load_page=lambda _n: page,
+                              close=lambda: closed.append(True))
+        provider = RapidOcrProvider(document_opener=lambda _path: doc)
+        self.assertEqual([], provider.extract_supplements(Path('body.pdf'), [1]))
+        self.assertIsNone(provider._engine)
+        self.assertEqual([True], closed)
+
+    @unittest.skipUnless(
+        importlib.util.find_spec("rapidocr") and importlib.util.find_spec("pymupdf"),
+        "optional OCR dependencies are not installed",
+    )
+    def test_rapidocr_supplements_real_cover_without_duplicating_native_footer(self):
+        import pymupdf
+
+        with TemporaryDirectory() as temporary:
+            source = pymupdf.open()
+            page = source.new_page(width=600, height=800)
+            page.insert_text((60, 320), "ACME CATALOGUE 2026", fontsize=30)
+            raster = page.get_pixmap(dpi=150, alpha=False).tobytes("png")
+            source.close()
+            cover = pymupdf.open()
+            page = cover.new_page(width=600, height=800)
+            page.insert_image(page.rect, stream=raster)
+            page.insert_text((330, 770), "www.example.org", fontsize=14)
+            path = Path(temporary) / "cover.pdf"
+            cover.save(path)
+            cover.close()
+
+            results = RapidOcrProvider().extract_supplements(path, [1])
+
+        self.assertEqual([1], [page.page for page in results])
+        self.assertIn("ACME", results[0].markdown)
+        self.assertIn("CATALOGUE", results[0].markdown)
+        self.assertIn("2026", results[0].markdown)
+        self.assertNotIn("example", results[0].markdown.lower())
+
     @unittest.skipUnless(
         importlib.util.find_spec("rapidocr") and importlib.util.find_spec("pymupdf"),
         "optional OCR dependencies are not installed",

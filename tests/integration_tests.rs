@@ -1099,6 +1099,22 @@ fn test_snapshot_thermo_freon12() {
 }
 
 #[test]
+fn test_freon_units_and_independent_prose_columns() {
+    let result = pdf_inspector::process_pdf("tests/fixtures/thermo-freon12.pdf").unwrap();
+    let markdown = result.markdown.unwrap();
+    assert!(markdown.contains("|Critical Density|565.0 kg/m³|"));
+    assert!(markdown.contains("|Critical Volume|0.0018 m³/kg|"));
+    assert!(markdown.contains("Tables of the thermodynamic properties of R-12 have been"));
+    assert!(markdown.contains("Vf = Fluid (liquid) specific volume in cubic meters per kilogram"));
+    let body = markdown.find("Tables of the thermodynamic").unwrap();
+    let end = markdown.find("Technology, 1998).").unwrap();
+    let units = markdown.find("P = Pressure in kPa.").unwrap();
+    assert!(markdown.find("SI Units").unwrap() < body);
+    assert!(body < end && end < units);
+    assert!(units < markdown.find("|Critical Density|").unwrap());
+}
+
+#[test]
 fn test_snapshot_td9264() {
     assert_snapshot("td9264");
 }

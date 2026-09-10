@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import shutil
 import sqlite3
 import tarfile
@@ -142,6 +143,47 @@ def verify_backup(archive_path: Path) -> dict:
         return _verify_directory(root)
 
 
+def _rebase_task_paths(staging: Path, target_dir: Path) -> None:
+    """Rebind owned task files after verification, before publishing a restore.
+
+    Older backups contain absolute paths. TaskService owns predictable filenames,
+    so neither the original directory nor the operating system that created the
+    backup is needed to restore them. Only files present in the verified archive
+    may be referenced; missing files abort before anything reaches the target.
+    """
+    database = staging / "tasks.sqlite3"
+    if not database.is_file():
+        return
+    connection = sqlite3.connect(database)
+    try:
+        if not connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='tasks'"
+        ).fetchone():
+            return
+        for task_id, result_path in connection.execute(
+            "SELECT id, result_path FROM tasks"
+        ).fetchall():
+            if not re.fullmatch(r"[A-Za-z0-9_-]{1,100}", task_id):
+                raise ValueError("invalid task id in backup")
+            pdf_relative = Path("uploads") / f"{task_id}.pdf"
+            result_relative = Path("results") / f"{task_id}.json"
+            required = [pdf_relative, *([result_relative] if result_path else [])]
+            for relative in required:
+                if not (staging / relative).is_file():
+                    raise ValueError(f"task file missing from backup: {relative.as_posix()}")
+            connection.execute(
+                "UPDATE tasks SET pdf_path=?, result_path=? WHERE id=?",
+                (
+                    str(target_dir / pdf_relative),
+                    str(target_dir / result_relative) if result_path else None,
+                    task_id,
+                ),
+            )
+        connection.commit()
+    finally:
+        connection.close()
+
+
 def restore_backup(archive_path: Path, target_dir: Path) -> dict:
     target_dir = target_dir.resolve()
     if target_dir.exists() and any(target_dir.iterdir()):
@@ -156,6 +198,7 @@ def restore_backup(archive_path: Path, target_dir: Path) -> dict:
         root = Path(temporary)
         _extract(archive_path.resolve(), root)
         manifest = _verify_directory(root)
+        _rebase_task_paths(root / "data", target_dir)
         for source in (root / "data").rglob("*"):
             if source.is_file():
                 destination = target_dir / source.relative_to(root / "data")

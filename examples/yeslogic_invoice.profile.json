@@ -1,0 +1,34 @@
+{
+  "id": "yeslogic_invoice",
+  "name": "YesLogic sample invoice (fixed layout)",
+  "version": 2,
+  "fields": {
+    "invoice_number": {
+      "aliases": ["Invoice number"],
+      "type": "text",
+      "required": true,
+      "pages": [1],
+      "bbox": [50, 298, 270, 315],
+      "pattern": "[0-9]{6}"
+    },
+    "bank_branch": {
+      "aliases": ["Bank State Branch (BSB)"],
+      "type": "text",
+      "required": true,
+      "pages": [1],
+      "bbox": [50, 482, 280, 529],
+      "pattern": "[0-9]{6}"
+    }
+  },
+  "tables": {
+    "invoice_lines": {
+      "required": true,
+      "columns": {
+        "description": {"aliases": ["Description"], "required": true},
+        "from_date": {"aliases": ["From"]},
+        "until_date": {"aliases": ["Until"]},
+        "amount": {"aliases": ["Amount"], "type": "decimal", "required": true}
+      }
+    }
+  }
+}

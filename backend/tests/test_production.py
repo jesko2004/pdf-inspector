@@ -1,11 +1,13 @@
 import json
+import logging
 import sqlite3
 import unittest
-from io import BytesIO
+from io import BytesIO, StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from fastapi.testclient import TestClient
+from uvicorn.logging import DefaultFormatter
 
 from backend.app import create_app
 from backend.backup import create_backup, restore_backup, verify_backup
@@ -116,6 +118,24 @@ class ProductionControlsTests(unittest.TestCase):
         self.assertEqual(429, limited.status_code)
         self.assertIn("retry-after", limited.headers)
 
+    def test_request_json_uses_general_server_formatter(self):
+        output = StringIO()
+        handler = logging.StreamHandler(output)
+        handler.setFormatter(DefaultFormatter("%(levelprefix)s %(message)s", use_colors=False))
+        logger = logging.getLogger("uvicorn.error")
+        old_level = logger.level
+        logger.setLevel(logging.INFO)
+        logger.addHandler(handler)
+        try:
+            response = self.client.get("/health", headers={"X-Request-ID": "log-regression"})
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(old_level)
+        self.assertEqual(200, response.status_code)
+        line = output.getvalue()
+        record = json.loads(line[line.index("{"):])
+        self.assertEqual("log-regression", record["request_id"])
+
     def test_rag_token_limits_return_explicit_errors(self):
         too_much_context = self.client.post(
             "/v1/knowledge-bases/missing/ask",
@@ -209,6 +229,67 @@ class CapacityAndMigrationTests(unittest.TestCase):
 
 
 class BackupTests(unittest.TestCase):
+    def test_restored_results_and_retry_do_not_require_original_directory(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            settings = Settings(data_dir=source, builtin_profile_dir=BUILTIN_PROFILES)
+
+            def read_upload(path, profile):
+                self.assertEqual(b"%PDF-1.7", path.read_bytes())
+                return processor(path, profile)
+
+            service = TaskService(settings, processor=read_upload, start_workers=False)
+            try:
+                ready = service.create_task("ready.pdf", BytesIO(b"%PDF-1.7"), "purchase_quote")["id"]
+                failed = service.create_task("retry.pdf", BytesIO(b"%PDF-1.7"), "purchase_quote")["id"]
+                service.run_pending(ready)
+                service.tasks.begin_attempt(failed)
+                service.tasks.fail(failed, "InjectedError", "retry after restore")
+                expected = service.get_result(ready)
+            finally:
+                service.close()
+            archive = root / "backup.tar.gz"
+            create_backup(source, archive)
+            # Both paths are fixed children of this test's temporary directory.
+            source.rename(root / "source-unavailable")
+            restored = root / "restored"
+            restore_backup(archive, restored)
+            service = TaskService(
+                Settings(data_dir=restored, builtin_profile_dir=BUILTIN_PROFILES),
+                processor=read_upload, start_workers=False,
+            )
+            try:
+                self.assertEqual(expected, service.get_result(ready))
+                self.assertTrue(service.get_result_path(ready).is_relative_to(restored))
+                service.retry(failed)
+                service.run_pending(failed)
+                self.assertEqual("ready", service.get_task(failed)["status"])
+                self.assertEqual(2, service.get_task(failed)["attempts"])
+                self.assertTrue(service.get_result_path(failed).is_relative_to(restored))
+            finally:
+                service.close()
+
+    def test_restore_rejects_missing_task_file_before_copying(self):
+        with TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            source = root / "source"
+            service = TaskService(
+                Settings(data_dir=source, builtin_profile_dir=BUILTIN_PROFILES),
+                processor=processor, start_workers=False,
+            )
+            try:
+                task = service.create_task("one.pdf", BytesIO(b"%PDF-1.7"), "purchase_quote")
+            finally:
+                service.close()
+            (source / "uploads" / f"{task['id']}.pdf").unlink()
+            archive = root / "incomplete.tar.gz"
+            create_backup(source, archive)
+            target = root / "restored"
+            with self.assertRaisesRegex(ValueError, "task file missing"):
+                restore_backup(archive, target)
+            self.assertEqual([], list(target.iterdir()))
+
     def test_backup_verify_and_restore(self):
         with TemporaryDirectory() as temporary:
             root = Path(temporary)

@@ -22,7 +22,7 @@ class MarkdownTable:
 _SEPARATOR_CELL = re.compile(r"^:?-{3,}:?$")
 _HEADER_CLEANUP = re.compile(r"[\s_\-—–/\\:：()（）\[\]【】]+")
 _CURRENCY_PREFIX = re.compile(
-    r"^(?:CNY|RMB|USD|HKD|EUR|JPY|[¥￥$€])\s*", re.IGNORECASE
+    r"^(?:CNY|RMB|USD\s*\$?|HKD|EUR|JPY|[¥￥$€])\s*", re.IGNORECASE
 )
 _CURRENCY_SUFFIX = re.compile(
     r"\s*(?:元|圆|CNY|RMB|USD|HKD|EUR|JPY)$", re.IGNORECASE

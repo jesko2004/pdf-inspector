@@ -25,6 +25,30 @@ Use your own PDF corpus to validate extraction quality and compare local builds.
 The [benchmarking guide](docs/benchmarking.md) describes the reproducible
 baseline-versus-candidate workflow.
 
+The current offline acceptance covers native text extraction and an optional
+single-instance backend using local RapidOCR, SQLite, and hash/extractive
+providers. These providers validate the retrieval and citation workflow, not
+real-model answer quality or production service levels. See the
+[acceptance scope and known limitations](docs/acceptance-scope.md) and
+[current acceptance status](docs/acceptance-report.md).
+
+The Rust extractor itself does not perform OCR. The optional backend applies
+OCR to pages selected by the detector. Local RapidOCR also supplements image
+covers with sparse native text confined to page margins, preserving that text
+and filtering overlapping OCR lines. The catalogue cover case (Q-04) is
+addressed by this bounded path; it does not guarantee completion of every
+image-text region on native-text pages. See the [follow-up fixes](docs/acceptance-deferred-fixes.md).
+Backend status `ready` does not certify complete text coverage. When image text
+is needed as evidence outside the validated scope, check the source page or
+use a separately validated workflow. Handwriting and rotated stamps remain
+outside the current acceptance guarantee.
+
+Synthetic-bold title overprints and Chinese/Japanese line-wrap spacing have
+targeted fixes. Remaining cosmetic and complex-header improvements are deferred
+only when key values, units, field meanings, and source relationships are preserved.
+Conflicting source values must remain available for review; the known invoice
+BSB conflict correctly produces `needs_review`.
+
 ## Quick start
 
 All public APIs use **1-indexed PDF page numbers**: the first page is `1`.

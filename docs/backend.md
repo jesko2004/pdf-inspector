@@ -118,6 +118,10 @@ curl http://127.0.0.1:8000/v1/tasks/TASK_ID
 
 Statuses are `queued`, `processing`, `ready`, `needs_review`, and `failed`. `ready` and `needs_review` both have a result; `needs_review` means a required field/table is missing, values conflict/fail validation, or a page still requires OCR.
 
+`ready` means the implemented checks did not require review; it does not certify that every visible character or image-text region was extracted. Undetected omissions may not produce `needs_review`. Check source pages when missing text could affect business evidence, and resolve conflicting field candidates against their sources. The known invoice BSB conflict correctly remains `needs_review`; changing it to `ready` is not an acceptance goal.
+
+The current [offline acceptance scope](acceptance-scope.md) uses a single instance, SQLite, local RapidOCR, and hash/extractive providers. It validates the local workflow, not real-model answer quality or production service levels. The [acceptance report](acceptance-report.md) separates completed checks from remaining closeout work.
+
 Read or download the result:
 
 ```bash
@@ -223,11 +227,21 @@ curl -OJ http://127.0.0.1:8000/v1/tasks/TASK_ID/tables/line_items_1.csv
 
 ## Per-page OCR completion
 
-The native detector supplies `pages_needing_ocr`. The task processor sends only those pages to a configured adapter and merges successful OCR output back into the original page order before field extraction, table normalization, and chunking.
+The native detector supplies `pages_needing_ocr`. The task processor sends those pages to a configured adapter and merges successful OCR output back into the original page order before field extraction, table normalization, and chunking. Local RapidOCR additionally supports the bounded cover-supplement path described below; command adapters retain the page-level contract.
+
+This is not exhaustive image-text region detection on every page with a native text layer. The catalogue cover case (Q-04) is addressed by the local supplement path, while general native/image text completion remains outside the acceptance guarantee. Review source pages when business evidence depends on content outside the validated scope.
 
 ### Built-in local RapidOCR
 
 The built-in provider renders only the requested pages with PyMuPDF and recognizes Chinese/English text locally with RapidOCR and ONNX Runtime. No PDF or recognized text is sent to an external service. Lines below the configured confidence threshold are discarded, the remaining lines are restored to top-to-bottom order, and their mean confidence is recorded on the page.
+
+The confidence describes retained recognized lines, not completeness of page coverage. Complete handwriting or rotated-stamp recognition is outside the current acceptance guarantee. Cosmetic formatting limitations may be deferred only while key values, units, field meanings, and source relationships remain intact; semantic errors still require correction.
+
+For a native page with at most 200 text characters wholly inside the outer 15% margins and a displayed image covering at least 80% of the page, RapidOCR also checks for supplementary image text. Rotated or cropped pages are excluded from this path. Normal body pages do not initialize the OCR engine or render images for supplementation. These conservative conditions target image covers; small logos, dense native pages, arbitrary image regions, and complete layout reconstruction are not included.
+
+Supplementation preserves native Markdown, places recognized additions before it, and filters OCR lines whose bounds substantially overlap native spans. It records `extraction_method: "native+ocr"`, `ocr_confidence`, and `ocr.supplemented_pages`; page-level `requested_pages`/`completed_pages` retain their existing meaning. The additions enter field extraction and chunks with their source page. Bounding-box profile fields still use native region extraction, so supplementation does not add OCR-aware field coordinates.
+
+Empty cover recognition produces `ocr_supplement_empty`; a supplementary check failure produces `ocr_supplement_failed`. Both preserve native output and require review. Details appear in `document.issues`, `ocr.supplement_unresolved_pages`, and `ocr.supplement_error`. If inspection fails before a page can be identified, the issue's page list may be empty; this does not mean the check passed. Supplementary processing time is recorded as the `ocr_supplement` metric.
 
 ```powershell
 $env:PDF_INSPECTOR_OCR_PROVIDER='rapidocr'

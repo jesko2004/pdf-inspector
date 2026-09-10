@@ -193,6 +193,48 @@ class ProcessorTests(unittest.TestCase):
         self.assertEqual(2, table_chunk["page_start"])
         self.assertEqual(["商品明细"], table_chunk["section_path"])
 
+    def test_cover_supplement_preserves_native_evidence_and_reaches_chunks(self):
+        class CoverProvider(FakeOcrProvider):
+            def extract_supplements(self, _path, pages):
+                self.requested = pages
+                return [OcrPage(1, 'SPRING 2013 CATALOGUE', 0.98)]
+
+        provider = CoverProvider()
+        result = process_document(
+            Path('quote.pdf'), Profile(id='simple', name='Simple', version=1, fields={'supplier': {'aliases': ['供应商'], 'required': True}}),
+            FakeEngine(), ocr_provider=provider,
+        )
+        self.assertEqual([1, 2], provider.requested)
+        self.assertEqual('ready', result['status'])
+        self.assertEqual([1], result['ocr']['supplemented_pages'])
+        self.assertEqual([], result['ocr']['completed_pages'])
+        page = result['document']['pages'][0]
+        self.assertEqual('native+ocr', page['extraction_method'])
+        self.assertIn('供应商：甲公司', page['markdown'])
+        self.assertEqual(1, page['markdown'].count('SPRING 2013 CATALOGUE'))
+        self.assertTrue(any('CATALOGUE' in c['markdown'] and c['page_start'] == 1
+                            for c in result['chunks']))
+
+    def test_empty_or_failed_supplement_requires_review_without_losing_native(self):
+        class CoverProvider(FakeOcrProvider):
+            def extract_supplements(self, _path, _pages):
+                return [OcrPage(1, '')]
+
+        provider = CoverProvider()
+        profile = Profile(id='simple', name='Simple', version=1, fields={'supplier': {'aliases': ['供应商'], 'required': True}})
+        for fail in [False, True]:
+            with self.subTest(fail=fail):
+                if fail:
+                    def broken(*_args):
+                        raise RuntimeError('inference unavailable')
+                    provider.extract_supplements = broken
+                result = process_document(Path('quote.pdf'), profile, FakeEngine(), provider)
+                self.assertEqual('needs_review', result['status'])
+                self.assertIn('供应商：甲公司', result['document']['pages'][0]['markdown'])
+                self.assertEqual([], result['ocr']['supplemented_pages'])
+                self.assertEqual('ocr_supplement_failed' if fail else 'ocr_supplement_empty',
+                                 result['document']['issues'][0]['reason'])
+
 
 if __name__ == "__main__":
     unittest.main()

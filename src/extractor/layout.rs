@@ -108,6 +108,26 @@ pub(crate) fn detect_columns(
     let margin_threshold = page_width * 0.05;
     let valleys: Vec<(usize, usize)> = valleys
         .into_iter()
+        .map(|(start, end)| {
+            // A sparse short column can fall below the page-wide noise
+            // threshold. Center the gutter on its least occupied core,
+            // rather than halfway through the short column's text.
+            let minimum = histogram[start..end].iter().copied().min().unwrap_or(0);
+            let mut best = (start, start);
+            let mut run = start;
+            for (i, &count) in histogram.iter().enumerate().take(end).skip(start) {
+                if count != minimum {
+                    run = i + 1;
+                } else if i + 1 - run > best.1 - best.0 {
+                    best = (run, i + 1);
+                }
+            }
+            if (best.1 - best.0) as f32 * BIN_WIDTH >= MIN_GUTTER_WIDTH {
+                best
+            } else {
+                (start, end)
+            }
+        })
         .filter(|&(start, end)| {
             let width_pts = (end - start) as f32 * BIN_WIDTH;
             if width_pts < MIN_GUTTER_WIDTH {
@@ -370,9 +390,16 @@ fn try_xy_cut_split(
 ///
 /// Returns true only when *every* column passes a minimum prose density.
 fn columns_have_prose(columns: &[ColumnRegion], items: &[&TextItem]) -> bool {
+    columns_have_prose_with_ratio(columns, items, 0.40)
+}
+
+fn columns_have_prose_with_ratio(
+    columns: &[ColumnRegion],
+    items: &[&TextItem],
+    min_prose_ratio: f32,
+) -> bool {
     const Y_TOL: f32 = 3.0; // y-proximity to group items into the same line
     const LINE_FILL_THRESHOLD: f32 = 0.45; // line must span ≥45% of column width
-    const MIN_PROSE_RATIO: f32 = 0.40; // ≥40% of lines must be "full"
     const MIN_LINES: usize = 8; // need enough lines to judge
     const MIN_COL_WIDTH: f32 = 120.0; // columns must be ≥120pt (not narrow sidebars/fragments)
     const MAX_AVG_ITEMS_PER_LINE: f32 = 3.5; // prose has 1-3 items/line; tables/forms have 4+
@@ -467,7 +494,7 @@ fn columns_have_prose(columns: &[ColumnRegion], items: &[&TextItem]) -> bool {
             "columns_have_prose: col [{:.0}..{:.0}] lines={} full={} ratio={:.2} avg_items={:.1}",
             col.x_min, col.x_max, total_lines, full_lines, ratio, avg_items
         );
-        if ratio < MIN_PROSE_RATIO {
+        if ratio < min_prose_ratio {
             return false;
         }
         // Tables and forms tend to have many small items per line (one per cell),
@@ -778,7 +805,25 @@ fn validate_and_build_columns(
             let overlap_max = left_y_max.min(right_y_max);
             let overlap = (overlap_max - overlap_min).max(0.0);
 
-            if overlap / y_range < min_vertical_span {
+            let shorter_span = (left_y_max - left_y_min).min(right_y_max - right_y_min);
+            let short_prose_flow = shorter_span >= 40.0
+                && overlap >= shorter_span * 0.8
+                && [&left_items, &right_items].iter().all(|side| {
+                    side.iter()
+                        .filter(|item| {
+                            effective_width(item) >= 80.0
+                                && (item.text.split_whitespace().count() >= 4
+                                    || item
+                                        .text
+                                        .chars()
+                                        .filter(|c| crate::text_utils::is_cjk_char(*c))
+                                        .count()
+                                        >= 10)
+                        })
+                        .count()
+                        >= 5
+                });
+            if overlap / y_range < min_vertical_span && !short_prose_flow {
                 debug!(
                     "  valley rejected: overlap {:.0}/{:.0} = {:.2} < {:.2}",
                     overlap,
@@ -993,8 +1038,98 @@ pub(crate) fn is_newspaper_layout(
     let min_lines = per_column_lines.iter().map(|c| c.len()).min().unwrap_or(0);
     let max_lines = per_column_lines.iter().map(|c| c.len()).max().unwrap_or(0);
 
+    // A display title and a small footer beside a long body are an
+    // independent side panel, even though they occupy fewer than five rows.
+    if per_column_lines.len() == 2 && (2..=4).contains(&min_lines) && max_lines >= 15 {
+        let small = usize::from(per_column_lines[1].len() < per_column_lines[0].len());
+        let mut body_sizes: Vec<f32> = per_column_lines[1 - small]
+            .iter()
+            .flat_map(|line| &line.items)
+            .map(|item| item.font_size)
+            .collect();
+        body_sizes.sort_by(f32::total_cmp);
+        let body_size = body_sizes.get(body_sizes.len() / 2).copied().unwrap_or(0.0);
+        let display_lines = per_column_lines[small]
+            .iter()
+            .filter(|line| {
+                line.items.iter().any(|item| {
+                    item.font_size >= body_size * 1.6
+                        && item.text.chars().filter(|c| c.is_alphabetic()).count() >= 4
+                })
+            })
+            .count();
+        if body_size > 0.0 && display_lines >= 2 {
+            return true;
+        }
+    }
+
     if min_lines < 5 {
         return false;
+    }
+
+    // Dense forms can have equally long columns too. Repeated colon-ended
+    // labels paired with same-baseline values are rows, not independent prose.
+    if per_column_lines.len() == 2 {
+        for (index, lines) in per_column_lines.iter().enumerate() {
+            let labels: Vec<&TextLine> = lines
+                .iter()
+                .filter(|line| {
+                    line.items
+                        .last()
+                        .is_some_and(|it| it.text.trim_end().ends_with([':', '：']))
+                })
+                .collect();
+            if labels.len() >= 4 && labels.len() * 2 >= lines.len() {
+                let paired = labels
+                    .iter()
+                    .filter(|label| {
+                        per_column_lines[1 - index]
+                            .iter()
+                            .any(|value| (value.y - label.y).abs() < 3.0)
+                    })
+                    .count();
+                if paired * 4 >= labels.len() * 3 {
+                    return false;
+                }
+            }
+        }
+    }
+
+    // A final newspaper page may have a full left column and only one
+    // paragraph on the right. Require prose and substantial line width,
+    // instead of using line count alone to call that paragraph table rows.
+    if per_column_lines.iter().zip(columns).all(|(lines, column)| {
+        let prose_lines = lines
+            .iter()
+            .filter(|line| {
+                let text = line
+                    .items
+                    .iter()
+                    .map(|it| it.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ");
+                let left = line
+                    .items
+                    .iter()
+                    .map(|it| it.x)
+                    .fold(f32::INFINITY, f32::min);
+                let right = line
+                    .items
+                    .iter()
+                    .map(|it| it.x + effective_width(it))
+                    .fold(f32::NEG_INFINITY, f32::max);
+                (text.split_whitespace().count() >= 4
+                    || text
+                        .chars()
+                        .filter(|c| crate::text_utils::is_cjk_char(*c))
+                        .count()
+                        >= 10)
+                    && right - left >= (column.x_max - column.x_min) * 0.45
+            })
+            .count();
+        prose_lines * 5 >= lines.len() * 3
+    }) {
+        return true;
     }
 
     if min_lines < 15 {
@@ -1222,6 +1357,125 @@ pub(crate) fn group_into_lines_with_thresholds_and_regions(
     )
 }
 
+/// Recover compact, wrapped headline columns in a vertically isolated band.
+/// Large headlines elsewhere on the page obscure these local gutters in a
+/// whole-page histogram. Repeated starts, bold continuation lines and at least
+/// three columns distinguish this case from ordinary prose and numeric tables.
+fn group_local_headline_columns(items: &[TextItem], threshold: f32) -> Option<Vec<TextLine>> {
+    let mut sorted: Vec<&TextItem> = items
+        .iter()
+        .filter(|item| crate::extractor::is_text_layout_item(item))
+        .collect();
+    sorted.sort_by(|a, b| b.y.total_cmp(&a.y));
+    let mut bands: Vec<Vec<&TextItem>> = Vec::new();
+    for item in sorted {
+        if let Some(band) = bands.last_mut().filter(|band| {
+            band.last()
+                .is_some_and(|last| last.y - item.y <= 30.0_f32.max(item.font_size * 2.0))
+        }) {
+            band.push(item);
+        } else {
+            bands.push(vec![item]);
+        }
+    }
+    for band in bands {
+        if band.len() < 12 || band.iter().any(|item| !item.is_bold) {
+            continue;
+        }
+        let mut starts: Vec<(f32, usize)> = Vec::new();
+        for item in &band {
+            if let Some((_, count)) = starts.iter_mut().find(|(x, _)| (item.x - *x).abs() <= 4.0) {
+                *count += 1;
+            } else {
+                starts.push((item.x, 1));
+            }
+        }
+        let mut anchors: Vec<f32> = starts
+            .into_iter()
+            .filter(|(_, n)| *n >= 3)
+            .map(|(x, _)| x)
+            .collect();
+        anchors.sort_by(f32::total_cmp);
+        if !(3..=4).contains(&anchors.len()) || anchors.windows(2).any(|p| p[1] - p[0] < 80.0) {
+            continue;
+        }
+        let mut buckets = vec![Vec::new(); anchors.len()];
+        for item in &band {
+            let column = anchors
+                .iter()
+                .rposition(|x| item.x >= *x - 4.0)
+                .unwrap_or(0);
+            buckets[column].push((*item).clone());
+        }
+        let lines: Vec<Vec<TextLine>> = buckets
+            .into_iter()
+            .map(|mut bucket| {
+                bucket.sort_by(|a, b| b.y.total_cmp(&a.y).then(a.x.total_cmp(&b.x)));
+                group_single_column(bucket, threshold)
+            })
+            .collect();
+        if lines.iter().any(|column| {
+            column.len() < 3
+                || column
+                    .iter()
+                    .filter(|line| {
+                        line.items
+                            .first()
+                            .and_then(|it| it.text.trim().chars().next())
+                            .is_some_and(char::is_lowercase)
+                    })
+                    .count()
+                    < 2
+        }) {
+            continue;
+        }
+        let top = band
+            .iter()
+            .map(|item| item.y)
+            .fold(f32::NEG_INFINITY, f32::max);
+        let bottom = band.iter().map(|item| item.y).fold(f32::INFINITY, f32::min);
+        debug!(
+            "page {}: local headline band {:.1}..{:.1}, {} columns",
+            items[0].page,
+            bottom,
+            top,
+            lines.len()
+        );
+        let above: Vec<TextItem> = items.iter().filter(|item| item.y > top).cloned().collect();
+        let below: Vec<TextItem> = items
+            .iter()
+            .filter(|item| item.y < bottom)
+            .cloned()
+            .collect();
+        // This local shortcut must not flatten another column flow above
+        // or below the band. Leave more complex pages to the normal path.
+        if [&above, &below]
+            .iter()
+            .any(|region| detect_columns(region, items[0].page, false).len() > 1)
+        {
+            continue;
+        }
+        let mut result = group_single_column(above, threshold);
+        result.extend(lines.into_iter().flatten());
+        // Image placeholders inside the band are retained as separate items.
+        result.extend(group_single_column(
+            items
+                .iter()
+                .filter(|item| {
+                    item.y <= top
+                        && item.y >= bottom
+                        && !crate::extractor::is_text_layout_item(item)
+                })
+                .cloned()
+                .collect(),
+            threshold,
+        ));
+        result.extend(group_single_column(below, threshold));
+        return Some(result);
+    }
+    None
+}
+
 fn group_into_lines_with_thresholds_and_regions_impl(
     items: Vec<TextItem>,
     page_thresholds: &HashMap<u32, f32>,
@@ -1259,6 +1513,13 @@ fn group_into_lines_with_thresholds_and_regions_impl(
         // (computed before embedded-space removal, with full signal).
         // Non-Canva pages use the default 0.10 threshold.
         let adaptive_threshold = page_thresholds.get(&page).copied().unwrap_or(0.10);
+
+        if !table_pages.contains(&page) && !chart_regions.contains_key(&page) {
+            if let Some(lines) = group_local_headline_columns(&page_items, adaptive_threshold) {
+                all_lines.extend(lines);
+                continue;
+            }
+        }
 
         // Image-backed region graphs recover local/asymmetric column flows
         // that a whole-page projection cannot represent. Charts already have
@@ -1302,7 +1563,7 @@ fn group_into_lines_with_thresholds_and_regions_impl(
                 .map(|&(a, b, c, d)| (a as i32, b as i32, c as i32, d as i32))
                 .collect::<Vec<_>>())
         );
-        let columns = match chart_regions.get(&page).filter(|r| !r.is_empty()) {
+        let mut columns = match chart_regions.get(&page).filter(|r| !r.is_empty()) {
             Some(regions) => {
                 let col_input: Vec<TextItem> = page_items
                     .iter()
@@ -1321,6 +1582,30 @@ fn group_into_lines_with_thresholds_and_regions_impl(
             }
             None => detect_columns(&page_items, page, table_pages.contains(&page)),
         };
+
+        // After table items have been removed, a short spanning title can
+        // still hide the gutter between the remaining prose columns. Retry
+        // without bold headings, but require paragraph density on both sides
+        // before treating a short flow as newspaper-style text.
+        let mut recovered_prose_columns = false;
+        let mut recovered_prose_top = f32::INFINITY;
+        if columns.len() <= 1 && table_pages.contains(&page) && !chart_regions.contains_key(&page) {
+            let body: Vec<TextItem> = page_items
+                .iter()
+                .filter(|it| !it.is_bold)
+                .cloned()
+                .collect();
+            let candidate = detect_columns(&body, page, true);
+            // Removing headings weakens the gutter evidence. Demand nearly
+            // all rows fill the columns, excluding scattered chart labels.
+            if candidate.len() == 2
+                && columns_have_prose_with_ratio(&candidate, &body.iter().collect::<Vec<_>>(), 0.85)
+            {
+                columns = candidate;
+                recovered_prose_columns = true;
+                recovered_prose_top = body.iter().map(|it| it.y).fold(f32::NEG_INFINITY, f32::max);
+            }
+        }
 
         if columns.len() <= 1 {
             // Single column - use simple sorting
@@ -1345,7 +1630,10 @@ fn group_into_lines_with_thresholds_and_regions_impl(
             let mut column_items: Vec<TextItem> = Vec::new();
 
             for (i, item) in page_items.into_iter().enumerate() {
-                if spanning_mask[i] || spans_multiple_columns(&item, &columns) {
+                if spanning_mask[i]
+                    || spans_multiple_columns(&item, &columns)
+                    || item.y > recovered_prose_top + 5.0
+                {
                     spanning_items.push(item);
                 } else {
                     column_items.push(item);
@@ -1409,7 +1697,8 @@ fn group_into_lines_with_thresholds_and_regions_impl(
             // Process spanning items as their own group
             let spanning_lines = group_single_column(spanning_items, adaptive_threshold);
 
-            let is_newspaper = is_newspaper_layout(&per_column_lines, &columns);
+            let is_newspaper =
+                recovered_prose_columns || is_newspaper_layout(&per_column_lines, &columns);
             debug!(
                 "page {}: layout={}",
                 page,
@@ -1519,6 +1808,16 @@ fn group_into_lines_with_thresholds_and_regions_impl(
 /// Determine if Y-sorting should be used instead of stream order.
 /// Returns true if the stream order appears chaotic (items jump around in Y position).
 fn should_use_y_sorting(items: &[TextItem]) -> bool {
+    // AcroForm values are appended after the page content stream. Their
+    // stream order is therefore not reading order; use their widget geometry
+    // so a value stays beside its label even on a single-column form page.
+    if items.iter().any(|item| {
+        matches!(item.item_type, crate::types::ItemType::FormField)
+            && item.width > 0.0
+            && item.height > 0.0
+    }) {
+        return true;
+    }
     if items.len() < 5 {
         return false; // Not enough items to judge
     }
@@ -1709,6 +2008,170 @@ mod tests {
             item_type: ItemType::Text,
             mcid: None,
         }
+    }
+
+    #[test]
+    fn short_prose_column_keeps_its_gutter_and_reading_order() {
+        let mut items = Vec::new();
+        for row in 0..60 {
+            let mut item = make_item(
+                1,
+                35.0,
+                760.0 - row as f32 * 11.0,
+                &format!("Left paragraph line {row} remains together"),
+            );
+            item.width = 250.0;
+            items.push(item);
+            if row < 9 {
+                let mut item = make_item(
+                    1,
+                    305.0,
+                    760.0 - row as f32 * 11.0,
+                    &format!("Right paragraph line {row} remains together"),
+                );
+                item.width = 250.0;
+                items.push(item);
+            }
+        }
+        let columns = detect_columns(&items, 1, false);
+        assert_eq!(columns.len(), 2);
+        assert!((285.0..305.0).contains(&columns[0].x_max));
+        let lines = group_into_lines(items);
+        let texts: Vec<String> = lines
+            .iter()
+            .map(|line| {
+                line.items
+                    .iter()
+                    .map(|it| it.text.as_str())
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            })
+            .collect();
+        let left_end = texts
+            .iter()
+            .position(|text| text.contains("Left paragraph line 59"))
+            .unwrap();
+        let right_start = texts
+            .iter()
+            .position(|text| text.contains("Right paragraph line 0"))
+            .unwrap();
+        assert!(left_end < right_start);
+        assert!(texts
+            .iter()
+            .all(|text| !(text.contains("Left") && text.contains("Right"))));
+    }
+
+    #[test]
+    fn display_sidebar_stays_out_of_body_sentences() {
+        let mut items = Vec::new();
+        for row in 0..24 {
+            let mut item = make_item(
+                1,
+                36.0,
+                500.0 - row as f32 * 13.0,
+                &format!("Body sentence {row} with several ordinary words"),
+            );
+            item.width = 340.0;
+            item.font_size = 9.0;
+            items.push(item);
+        }
+        for (text, y, size) in [
+            ("Separate", 350.0, 24.0),
+            ("Display title", 325.0, 24.0),
+            ("example.test", 210.0, 8.0),
+        ] {
+            let mut item = make_item(1, 450.0, y, text);
+            item.width = 155.0;
+            item.font_size = size;
+            items.push(item);
+        }
+        let lines = group_into_lines(items);
+        for line in &lines {
+            assert!(
+                !(line.items.iter().any(|it| it.text.starts_with("Body"))
+                    && line.items.iter().any(|it| it.x > 400.0))
+            );
+        }
+        assert!(
+            lines
+                .iter()
+                .position(|line| line
+                    .items
+                    .iter()
+                    .any(|it| it.text.starts_with("Body sentence 23")))
+                .unwrap()
+                < lines
+                    .iter()
+                    .position(|line| line.items.iter().any(|it| it.text == "Separate"))
+                    .unwrap()
+        );
+    }
+
+    #[test]
+    fn appended_form_value_is_sorted_beside_its_label() {
+        let mut value = make_item(1, 420.0, 500.0, "total: 0");
+        value.item_type = ItemType::FormField;
+        let items = vec![
+            make_item(1, 50.0, 700.0, "Header"),
+            make_item(1, 330.0, 500.0, "Total"),
+            make_item(1, 50.0, 300.0, "Following explanatory paragraph"),
+            value,
+        ];
+        let lines = group_single_column(items, 0.1);
+        assert_eq!(lines.len(), 3);
+        assert_eq!(
+            lines[1]
+                .items
+                .iter()
+                .map(|item| item.text.as_str())
+                .collect::<Vec<_>>(),
+            ["Total", "total: 0"]
+        );
+        assert_eq!(lines[2].items[0].text, "Following explanatory paragraph");
+    }
+
+    #[test]
+    fn local_wrapped_headlines_are_column_ordered_but_numeric_rows_are_not() {
+        let mut items = vec![make_item(
+            1,
+            30.0,
+            700.0,
+            "Wide heading above the local columns",
+        )];
+        for row in 0..4 {
+            for column in 0..4 {
+                let text = if row == 0 {
+                    format!("Heading {column}")
+                } else {
+                    format!("continued {column} line {row}")
+                };
+                let mut item = make_item(
+                    1,
+                    30.0 + column as f32 * 135.0,
+                    300.0 - row as f32 * 13.0,
+                    &text,
+                );
+                item.width = 115.0;
+                item.is_bold = true;
+                items.push(item);
+            }
+        }
+        let lines = group_local_headline_columns(&items, 0.1).unwrap();
+        let texts: Vec<&str> = lines
+            .iter()
+            .flat_map(|line| line.items.iter().map(|it| it.text.as_str()))
+            .collect();
+        assert!(
+            texts
+                .iter()
+                .position(|text| *text == "continued 0 line 3")
+                .unwrap()
+                < texts.iter().position(|text| *text == "Heading 1").unwrap()
+        );
+        for item in items.iter_mut().skip(1) {
+            item.text = "123.45".into();
+        }
+        assert!(group_local_headline_columns(&items, 0.1).is_none());
     }
 
     /// Generate dense items in a horizontal zone across many Y positions.
@@ -1924,6 +2387,26 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    #[test]
+    fn aligned_label_value_columns_remain_row_ordered() {
+        let mut labels = make_lines(18, 50.0);
+        let values = make_lines(18, 230.0);
+        for line in &mut labels {
+            line.items[0].text = "Account number:".into();
+        }
+        let columns = vec![
+            ColumnRegion {
+                x_min: 50.0,
+                x_max: 205.0,
+            },
+            ColumnRegion {
+                x_min: 205.0,
+                x_max: 530.0,
+            },
+        ];
+        assert!(!is_newspaper_layout(&[labels, values], &columns));
     }
 
     #[test]

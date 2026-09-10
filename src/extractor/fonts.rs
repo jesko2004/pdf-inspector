@@ -1222,7 +1222,7 @@ pub(crate) fn extract_text_from_operand(
         }
     })();
     result.map(|text| {
-        let text = clean_symbol_pua(text);
+        let text = clean_symbol_pua(text, base_font_name);
         let text = remap_texcm_math_symbols(text, base_font_name);
         normalize_cp1252_controls(text, use_cp1252_fallback)
     })
@@ -1421,10 +1421,15 @@ fn should_use_cp1252_single_byte_fallback(
 
 /// Replace PUA characters in the F000-F0FF range with standard Unicode equivalents.
 /// These come from Symbol/Wingdings fonts whose ToUnicode CMaps map to PUA.
-fn clean_symbol_pua(text: String) -> String {
+fn clean_symbol_pua(text: String, base_font_name: Option<&str>) -> String {
     if !text.chars().any(|c| ('\u{F000}'..='\u{F0FF}').contains(&c)) {
         return text;
     }
+    let wingdings2 = base_font_name.is_some_and(|name| {
+        name.rsplit('+')
+            .next()
+            .is_some_and(|family| family.eq_ignore_ascii_case("Wingdings2"))
+    });
     text.chars()
         .map(|c| {
             let code = c as u32;
@@ -1432,6 +1437,11 @@ fn clean_symbol_pua(text: String) -> String {
                 return c;
             }
             let low = code - 0xF000;
+            // Wingdings 2's empty square is not the Latin-1 pound sign.
+            // Keep this font-specific: U+00A3 in ordinary text is currency.
+            if wingdings2 && low == 0xA3 {
+                return '\u{25A1}';
+            }
             match low {
                 // Common bullets
                 0xA1 | 0xA7 | 0xB7 => '\u{2022}',
@@ -1537,6 +1547,23 @@ fn score_text(text: &str) -> i32 {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn wingdings2_checkbox_does_not_become_currency() {
+        assert_eq!(
+            super::clean_symbol_pua("\u{f0a3}".into(), Some("ABCDEF+Wingdings2")),
+            "□"
+        );
+        assert_eq!(
+            super::clean_symbol_pua("£950".into(), Some("Arial")),
+            "£950"
+        );
+        assert_eq!(super::clean_symbol_pua("£".into(), Some("Wingdings2")), "£");
+        assert_eq!(
+            super::clean_symbol_pua("\u{f0fc}".into(), Some("Wingdings")),
+            "✓"
+        );
+    }
 
     #[test]
     fn cid_fallback_repairs_only_invalid_primary_mappings() {

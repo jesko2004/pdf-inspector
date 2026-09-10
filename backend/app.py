@@ -237,7 +237,10 @@ def create_app(
         metrics.observe(
             "http_request", duration, "error" if status_code >= 400 else "success"
         )
-        logging.getLogger("uvicorn.access").info(
+        # Uvicorn's access formatter expects its five HTTP access arguments.
+        # The child of its general logger uses a plain message formatter and
+        # still participates in the configured server log level and handlers.
+        logging.getLogger("uvicorn.error.pdf_inspector").info(
             json_log(
                 request_id=request_id,
                 actor_id=principal.key_id if principal else "unauthenticated",
