@@ -6,6 +6,7 @@ import json
 import logging
 import re
 from contextlib import asynccontextmanager
+from datetime import datetime
 from functools import partial
 from time import perf_counter
 from typing import Annotated
@@ -32,12 +33,15 @@ from .knowledge_models import (
     KnowledgeBaseReindex,
     KnowledgeBaseUpdate,
     KnowledgeDocumentIngest,
+    KnowledgeFeedbackCreate,
     KnowledgeRetrievalEvaluationRequest,
     KnowledgeSearchRequest,
+    normalize_aware_datetime,
 )
-from .knowledge_service import EmbeddingFactory, KnowledgeService
+from .knowledge_service import EmbeddingFactory, KnowledgeService, RerankerFactory
 from .knowledge_store import (
     InvalidKnowledgeStateError,
+    KnowledgeAnswerNotFoundError,
     KnowledgeBaseNotFoundError,
     KnowledgeConflictError,
     KnowledgeDocumentNotFoundError,
@@ -82,6 +86,7 @@ def create_app(
     *,
     processor: Processor | None = None,
     embedding_factory: EmbeddingFactory | None = None,
+    reranker_factory: RerankerFactory | None = None,
     llm_factory: LlmFactory | None = None,
     vector_store: VectorStore | None = None,
     start_workers: bool = True,
@@ -106,6 +111,7 @@ def create_app(
         KnowledgeStore(settings.knowledge_database_path),
         vector_store or create_vector_store(settings),
         embedding_factory=embedding_factory,
+        reranker_factory=reranker_factory,
         start_workers=start_workers,
         metrics=metrics,
     )
@@ -332,6 +338,13 @@ def create_app(
                 page_end=payload.page_end,
                 kinds=payload.kinds,
                 section_path_prefix=payload.section_path_prefix,
+                table_filters=payload.table_filters,
+                rewrite_query=payload.rewrite_query,
+                max_query_variants=payload.max_query_variants,
+                rerank=payload.rerank,
+                include_historical=payload.include_historical,
+                versions=payload.versions,
+                as_of=payload.as_of.isoformat() if payload.as_of else None,
             )
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(
@@ -355,6 +368,15 @@ def create_app(
                 page_end=payload.page_end,
                 kinds=payload.kinds,
                 section_path_prefix=payload.section_path_prefix,
+                table_filters=payload.table_filters,
+                rewrite_query=payload.rewrite_query,
+                max_query_variants=payload.max_query_variants,
+                compare_rewrite=payload.compare_rewrite,
+                rerank=payload.rerank,
+                compare_rerank=payload.compare_rerank,
+                include_historical=payload.include_historical,
+                versions=payload.versions,
+                as_of=payload.as_of.isoformat() if payload.as_of else None,
             )
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(
@@ -398,6 +420,13 @@ def create_app(
                 page_end=payload.page_end,
                 kinds=payload.kinds,
                 section_path_prefix=payload.section_path_prefix,
+                table_filters=payload.table_filters,
+                rewrite_query=payload.rewrite_query,
+                max_query_variants=payload.max_query_variants,
+                rerank=payload.rerank,
+                include_historical=payload.include_historical,
+                versions=payload.versions,
+                as_of=payload.as_of.isoformat() if payload.as_of else None,
                 max_context_tokens=payload.max_context_tokens,
                 max_output_tokens=payload.max_output_tokens,
             )
@@ -415,6 +444,7 @@ def create_app(
                             count,
                             token_kind=token_kind,
                         )
+                knowledge.store.record_answer(answer)
                 return answer
 
             def event_stream():
@@ -427,6 +457,17 @@ def create_app(
                             )
                             if prepared.refused:
                                 metrics.increment("pdf_inspector_rag_refusals_total")
+                            knowledge.store.record_answer(
+                                {
+                                    "answer_id": prepared.answer_id,
+                                    "knowledge_base_id": prepared.knowledge_base_id,
+                                    "question": prepared.question,
+                                    "answer": event["data"]["answer"],
+                                    "refused": prepared.refused,
+                                    "citations": prepared.citations,
+                                    "retrieval": prepared.retrieval,
+                                }
+                            )
                         yield (
                             f"event: {event['event']}\n"
                             f"data: {json.dumps(event['data'], ensure_ascii=False)}\n\n"
@@ -448,6 +489,79 @@ def create_app(
             ) from exc
         except (EmbeddingError, LlmError, ValueError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    @app.post("/v1/knowledge-bases/{knowledge_base_id}/feedback", status_code=201)
+    def create_answer_feedback(
+        knowledge_base_id: str, payload: KnowledgeFeedbackCreate
+    ) -> dict:
+        try:
+            return knowledge.store.create_feedback(
+                knowledge_base_id, payload.model_dump(mode="json")
+            )
+        except KnowledgeAnswerNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="answer_not_found") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/feedback")
+    def list_answer_feedback(
+        knowledge_base_id: str,
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+        offset: Annotated[int, Query(ge=0)] = 0,
+    ) -> dict:
+        try:
+            return {
+                "items": knowledge.store.list_feedback(
+                    knowledge_base_id, limit, offset
+                ),
+                "limit": limit,
+                "offset": offset,
+            }
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/feedback/summary")
+    def summarize_answer_feedback(
+        knowledge_base_id: str,
+        created_from: datetime | None = None,
+        created_to: datetime | None = None,
+    ) -> dict:
+        try:
+            try:
+                created_from = normalize_aware_datetime(created_from)
+                created_to = normalize_aware_datetime(created_to)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=str(exc)) from exc
+            if (
+                created_from is not None
+                and created_to is not None
+                and created_from >= created_to
+            ):
+                raise HTTPException(
+                    status_code=422,
+                    detail="created_from must be earlier than created_to",
+                )
+            return knowledge.store.feedback_summary(
+                knowledge_base_id,
+                created_from=created_from.isoformat() if created_from else None,
+                created_to=created_to.isoformat() if created_to else None,
+            )
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
+
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/feedback/evaluation-cases")
+    def export_feedback_evaluation_cases(knowledge_base_id: str) -> dict:
+        try:
+            items = knowledge.store.feedback_evaluation_cases(knowledge_base_id)
+            return {"items": items, "count": len(items), "redacted": True}
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(
+                status_code=404, detail="knowledge_base_not_found"
+            ) from exc
 
     @app.patch("/v1/knowledge-bases/{knowledge_base_id}")
     def update_knowledge_base(
@@ -491,7 +605,20 @@ def create_app(
     ) -> dict:
         try:
             return knowledge.ingest_task(
-                knowledge_base_id, payload.task_id, payload.document_key
+                knowledge_base_id,
+                payload.task_id,
+                payload.document_key,
+                version=payload.version,
+                effective_from=(
+                    payload.effective_from.isoformat()
+                    if payload.effective_from is not None
+                    else None
+                ),
+                effective_to=(
+                    payload.effective_to.isoformat()
+                    if payload.effective_to is not None
+                    else None
+                ),
             )
         except KnowledgeBaseNotFoundError as exc:
             raise HTTPException(

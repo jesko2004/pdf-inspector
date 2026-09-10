@@ -178,10 +178,15 @@ class ApiTests(unittest.TestCase):
                 "page_start": 1,
                 "page_end": 1,
                 "kinds": ["text"],
+                "rerank": True,
             },
         )
         self.assertEqual(200, search.status_code)
         self.assertEqual(1, search.json()["returned"])
+        self.assertFalse(search.json()["rerank"]["applied"])
+        self.assertEqual(
+            "provider_disabled", search.json()["rerank"]["fallback_reason"]
+        )
         self.assertEqual(document["id"], search.json()["items"][0]["document_id"])
         self.assertEqual("manual.pdf", search.json()["items"][0]["filename"])
         self.assertEqual([1], search.json()["items"][0]["citation"]["pages"])
@@ -191,6 +196,7 @@ class ApiTests(unittest.TestCase):
             json={
                 "top_k": 1,
                 "min_score": -1,
+                "compare_rerank": True,
                 "cases": [
                     {
                         "id": "supplier-question",
@@ -205,15 +211,48 @@ class ApiTests(unittest.TestCase):
         self.assertEqual(200, evaluation.status_code)
         self.assertEqual(1.0, evaluation.json()["mean_recall_at_k"])
         self.assertEqual(1.0, evaluation.json()["mrr"])
+        self.assertTrue(evaluation.json()["comparison"]["features"]["rerank"])
 
         answer = self.client.post(
             f"/v1/knowledge-bases/{knowledge_base['id']}/ask",
-            json={"question": "测试供应商", "min_score": -1},
+            json={
+                "question": "test@example.com 测试供应商",
+                "min_score": -1,
+                "rerank": True,
+            },
         )
         self.assertEqual(200, answer.status_code)
         self.assertFalse(answer.json()["refused"])
+        self.assertFalse(answer.json()["retrieval"]["rerank"]["applied"])
         self.assertEqual([1], answer.json()["citations"][0]["pages"])
         self.assertIn("测试供应商", answer.json()["answer"])
+        citation_id = answer.json()["citations"][0]["chunk_id"]
+        feedback = self.client.post(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/feedback",
+            json={
+                "answer_id": answer.json()["answer_id"],
+                "helpful": True,
+                "valid_citation_ids": [citation_id],
+                "correction": "请联系 owner@example.com",
+            },
+        )
+        self.assertEqual(201, feedback.status_code)
+        summary = self.client.get(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/feedback/summary"
+        ).json()
+        self.assertEqual(1.0, summary["helpful_rate"])
+        self.assertEqual(1.0, summary["citation_precision"])
+        invalid_window = self.client.get(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/feedback/summary",
+            params={"created_from": "2026-01-01T00:00:00"},
+        )
+        self.assertEqual(422, invalid_window.status_code)
+        evaluation_cases = self.client.get(
+            f"/v1/knowledge-bases/{knowledge_base['id']}/feedback/evaluation-cases"
+        ).json()
+        self.assertTrue(evaluation_cases["redacted"])
+        self.assertIn("[EMAIL]", evaluation_cases["items"][0]["query"])
+        self.assertIn("[EMAIL]", evaluation_cases["items"][0]["expected_answer"])
 
         streamed = self.client.post(
             f"/v1/knowledge-bases/{knowledge_base['id']}/ask",

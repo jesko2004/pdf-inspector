@@ -109,6 +109,56 @@ class ConfigTests(unittest.TestCase):
         self.assertEqual(8, settings.max_active_tasks)
         self.assertNotIn("secret", repr(settings))
 
+    def test_query_alias_environment_options(self):
+        environment = {
+            "PDF_INSPECTOR_QUERY_ALIASES_JSON": (
+                '{"PO":"purchase order","采购单":"采购订单"}'
+            )
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = Settings.from_env()
+
+        self.assertEqual(
+            (("PO", "purchase order"), ("采购单", "采购订单")),
+            settings.query_aliases,
+        )
+
+    def test_query_aliases_must_be_a_json_object(self):
+        with patch.dict(
+            os.environ,
+            {"PDF_INSPECTOR_QUERY_ALIASES_JSON": '["PO"]'},
+            clear=True,
+        ), self.assertRaisesRegex(ValueError, "JSON object"):
+            Settings.from_env()
+
+    def test_flashrank_environment_options(self):
+        environment = {
+            "PDF_INSPECTOR_RERANK_PROVIDER": "flashrank",
+            "PDF_INSPECTOR_RERANK_MODEL": "ms-marco-MultiBERT-L-12",
+            "PDF_INSPECTOR_RERANK_CANDIDATES": "16",
+            "PDF_INSPECTOR_RERANK_TOP_N": "6",
+            "PDF_INSPECTOR_RERANK_MAX_LENGTH": "192",
+            "PDF_INSPECTOR_RERANK_TIMEOUT_MS": "800",
+        }
+        with patch.dict(os.environ, environment, clear=True):
+            settings = Settings.from_env()
+
+        self.assertEqual("flashrank", settings.rerank_provider)
+        self.assertEqual(16, settings.rerank_candidates)
+        self.assertEqual(6, settings.rerank_top_n)
+        self.assertEqual(192, settings.rerank_max_length)
+        self.assertEqual(800, settings.rerank_timeout_ms)
+
+    def test_rerank_top_n_must_not_exceed_candidates(self):
+        environment = {
+            "PDF_INSPECTOR_RERANK_CANDIDATES": "4",
+            "PDF_INSPECTOR_RERANK_TOP_N": "5",
+        }
+        with patch.dict(os.environ, environment, clear=True), self.assertRaisesRegex(
+            ValueError, "RERANK_TOP_N"
+        ):
+            Settings.from_env()
+
     def test_invalid_api_key_role_is_rejected(self):
         environment = {
             "PDF_INSPECTOR_API_KEYS_JSON": (

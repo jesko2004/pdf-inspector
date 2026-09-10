@@ -2,7 +2,18 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+def normalize_aware_datetime(value: datetime | None) -> datetime | None:
+    """Require an unambiguous instant and normalize it for storage comparisons."""
+    if value is None:
+        return None
+    if value.tzinfo is None or value.utcoffset() is None:
+        raise ValueError("datetime values must include a timezone offset")
+    return value.astimezone(timezone.utc)
 
 
 class KnowledgeBaseCreate(BaseModel):
@@ -57,8 +68,11 @@ class KnowledgeDocumentIngest(BaseModel):
 
     task_id: str = Field(min_length=1, max_length=100)
     document_key: str | None = Field(default=None, max_length=300)
+    version: str | None = Field(default=None, max_length=100)
+    effective_from: datetime | None = None
+    effective_to: datetime | None = None
 
-    @field_validator("task_id", "document_key")
+    @field_validator("task_id", "document_key", "version")
     @classmethod
     def strip_strings(cls, value: str | None) -> str | None:
         if value is None:
@@ -67,6 +81,21 @@ class KnowledgeDocumentIngest(BaseModel):
         if not stripped:
             raise ValueError("value must not be blank")
         return stripped
+
+    @field_validator("effective_from", "effective_to")
+    @classmethod
+    def normalize_effective_datetimes(cls, value: datetime | None) -> datetime | None:
+        return normalize_aware_datetime(value)
+
+    @model_validator(mode="after")
+    def validate_effective_range(self) -> KnowledgeDocumentIngest:
+        if (
+            self.effective_from is not None
+            and self.effective_to is not None
+            and self.effective_from >= self.effective_to
+        ):
+            raise ValueError("effective_from must be earlier than effective_to")
+        return self
 
 
 class KnowledgeBaseReindex(BaseModel):
@@ -98,6 +127,13 @@ class KnowledgeSearchRequest(BaseModel):
     page_end: int | None = Field(default=None, ge=1)
     kinds: list[str] = Field(default_factory=list, max_length=20)
     section_path_prefix: list[str] = Field(default_factory=list, max_length=20)
+    table_filters: dict[str, str] = Field(default_factory=dict, max_length=20)
+    rewrite_query: bool = False
+    max_query_variants: int = Field(default=3, ge=1, le=5)
+    rerank: bool = False
+    include_historical: bool = False
+    versions: list[str] = Field(default_factory=list, max_length=20)
+    as_of: datetime | None = None
 
     @field_validator("query")
     @classmethod
@@ -107,7 +143,12 @@ class KnowledgeSearchRequest(BaseModel):
             raise ValueError("query must not be blank")
         return stripped
 
-    @field_validator("document_ids", "kinds", "section_path_prefix")
+    @field_validator("as_of")
+    @classmethod
+    def normalize_as_of(cls, value: datetime | None) -> datetime | None:
+        return normalize_aware_datetime(value)
+
+    @field_validator("document_ids", "kinds", "section_path_prefix", "versions")
     @classmethod
     def normalize_string_lists(cls, values: list[str]) -> list[str]:
         normalized = []
@@ -117,6 +158,18 @@ class KnowledgeSearchRequest(BaseModel):
                 raise ValueError("filter values must not be blank")
             if stripped not in normalized:
                 normalized.append(stripped)
+        return normalized
+
+    @field_validator("table_filters")
+    @classmethod
+    def normalize_table_filters(cls, values: dict[str, str]) -> dict[str, str]:
+        normalized = {}
+        for key, value in values.items():
+            key = key.strip()
+            value = value.strip()
+            if not key or not value:
+                raise ValueError("table filter keys and values must not be blank")
+            normalized[key] = value
         return normalized
 
     @model_validator(mode="after")
@@ -181,11 +234,30 @@ class KnowledgeRetrievalEvaluationRequest(BaseModel):
     page_end: int | None = Field(default=None, ge=1)
     kinds: list[str] = Field(default_factory=list, max_length=20)
     section_path_prefix: list[str] = Field(default_factory=list, max_length=20)
+    table_filters: dict[str, str] = Field(default_factory=dict, max_length=20)
+    rewrite_query: bool = False
+    max_query_variants: int = Field(default=3, ge=1, le=5)
+    compare_rewrite: bool = False
+    rerank: bool = False
+    compare_rerank: bool = False
+    include_historical: bool = False
+    versions: list[str] = Field(default_factory=list, max_length=20)
+    as_of: datetime | None = None
 
-    @field_validator("document_ids", "kinds", "section_path_prefix")
+    @field_validator("as_of")
+    @classmethod
+    def normalize_as_of(cls, value: datetime | None) -> datetime | None:
+        return normalize_aware_datetime(value)
+
+    @field_validator("document_ids", "kinds", "section_path_prefix", "versions")
     @classmethod
     def normalize_string_lists(cls, values: list[str]) -> list[str]:
         return KnowledgeSearchRequest.normalize_string_lists(values)
+
+    @field_validator("table_filters")
+    @classmethod
+    def normalize_table_filters(cls, values: dict[str, str]) -> dict[str, str]:
+        return KnowledgeSearchRequest.normalize_table_filters(values)
 
     @model_validator(mode="after")
     def validate_page_range(self) -> KnowledgeRetrievalEvaluationRequest:
@@ -212,9 +284,21 @@ class KnowledgeAskRequest(BaseModel):
     page_end: int | None = Field(default=None, ge=1)
     kinds: list[str] = Field(default_factory=list, max_length=20)
     section_path_prefix: list[str] = Field(default_factory=list, max_length=20)
+    table_filters: dict[str, str] = Field(default_factory=dict, max_length=20)
+    rewrite_query: bool = False
+    max_query_variants: int = Field(default=3, ge=1, le=5)
+    rerank: bool = False
+    include_historical: bool = False
+    versions: list[str] = Field(default_factory=list, max_length=20)
+    as_of: datetime | None = None
     max_context_tokens: int | None = Field(default=None, ge=128, le=128000)
     max_output_tokens: int | None = Field(default=None, ge=1, le=16000)
     stream: bool = False
+
+    @field_validator("as_of")
+    @classmethod
+    def normalize_as_of(cls, value: datetime | None) -> datetime | None:
+        return normalize_aware_datetime(value)
 
     @field_validator("question")
     @classmethod
@@ -224,10 +308,15 @@ class KnowledgeAskRequest(BaseModel):
             raise ValueError("question must not be blank")
         return stripped
 
-    @field_validator("document_ids", "kinds", "section_path_prefix")
+    @field_validator("document_ids", "kinds", "section_path_prefix", "versions")
     @classmethod
     def normalize_string_lists(cls, values: list[str]) -> list[str]:
         return KnowledgeSearchRequest.normalize_string_lists(values)
+
+    @field_validator("table_filters")
+    @classmethod
+    def normalize_table_filters(cls, values: dict[str, str]) -> dict[str, str]:
+        return KnowledgeSearchRequest.normalize_table_filters(values)
 
     @model_validator(mode="after")
     def validate_page_range(self) -> KnowledgeAskRequest:
@@ -237,4 +326,34 @@ class KnowledgeAskRequest(BaseModel):
             and self.page_start > self.page_end
         ):
             raise ValueError("page_start must not be greater than page_end")
+        return self
+
+
+class KnowledgeFeedbackCreate(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    answer_id: str = Field(min_length=1, max_length=100)
+    helpful: bool
+    valid_citation_ids: list[str] = Field(default_factory=list, max_length=100)
+    invalid_citation_ids: list[str] = Field(default_factory=list, max_length=100)
+    correction: str | None = Field(default=None, max_length=8000)
+    comment: str | None = Field(default=None, max_length=2000)
+
+    @field_validator("answer_id", "correction", "comment")
+    @classmethod
+    def strip_optional_text(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        stripped = value.strip()
+        return stripped or None
+
+    @field_validator("valid_citation_ids", "invalid_citation_ids")
+    @classmethod
+    def normalize_citation_ids(cls, values: list[str]) -> list[str]:
+        return KnowledgeSearchRequest.normalize_string_lists(values)
+
+    @model_validator(mode="after")
+    def citations_must_not_overlap(self) -> KnowledgeFeedbackCreate:
+        if set(self.valid_citation_ids).intersection(self.invalid_citation_ids):
+            raise ValueError("valid and invalid citation IDs must not overlap")
         return self

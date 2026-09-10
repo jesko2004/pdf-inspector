@@ -19,6 +19,18 @@ To run OCR locally, install the additional models and inference runtime:
 pip install -e ".[backend,ocr]"
 ```
 
+To expose the existing search as a LangChain Runnable and enable the optional
+CPU-only FlashRank reranker:
+
+```bash
+pip install -e ".[backend,rag-langchain]"
+```
+
+The `rag-langchain` extra requires Python 3.10 or newer. FlashRank downloads its
+selected model on first use (about 100 MB for the default multilingual model),
+so production deployments should pre-warm the model cache before accepting
+traffic.
+
 The service listens on `127.0.0.1:8000`. OpenAPI documentation is available at `http://127.0.0.1:8000/docs`.
 
 Environment variables:
@@ -48,6 +60,13 @@ Environment variables:
 | `PDF_INSPECTOR_SEARCH_RATE_LIMIT_PER_MINUTE` | `120` | Per-key/IP search requests per minute |
 | `PDF_INSPECTOR_ASK_RATE_LIMIT_PER_MINUTE` | `30` | Per-key/IP answer requests per minute |
 | `PDF_INSPECTOR_MAX_ACTIVE_TASKS` | `100` | Maximum combined queued and processing PDF tasks |
+| `PDF_INSPECTOR_QUERY_ALIASES_JSON` | `{}` | Optional abbreviation-to-expansion map used by bounded query rewriting |
+| `PDF_INSPECTOR_RERANK_PROVIDER` | `none` | `none` or optional local `flashrank` reranking |
+| `PDF_INSPECTOR_RERANK_MODEL` | `ms-marco-MultiBERT-L-12` | FlashRank model; the default supports multilingual workloads |
+| `PDF_INSPECTOR_RERANK_CANDIDATES` | `12` | RRF candidates sent to the second-stage reranker (2-100) |
+| `PDF_INSPECTOR_RERANK_TOP_N` | `5` | Maximum reranked results returned to generation |
+| `PDF_INSPECTOR_RERANK_MAX_LENGTH` | `256` | Maximum query-plus-child token window used by FlashRank (32-512) |
+| `PDF_INSPECTOR_RERANK_TIMEOUT_MS` | `500` | Fail-open reranking time budget (10-30000 ms) |
 
 For multi-host deployment, replace the in-process executor and local files with a shared queue/object store. A single service process is durable across restarts: SQLite retains tasks and interrupted `processing` tasks are queued again on startup.
 
@@ -69,7 +88,7 @@ Every response includes `X-Request-ID`; a valid caller-supplied ID is preserved.
 
 Upload bytes, active tasks, per-key/IP search and answer frequency, and RAG context/output Tokens are bounded. Rate and capacity failures return HTTP `429` with a stable error detail; rate responses include `Retry-After`. The in-memory rate limiter is intentionally single-process. Use a gateway or Redis-backed limiter when phase-5 multi-instance work is enabled.
 
-SQLite stores maintain a `schema_migrations` ledger and validate migration names/versions at startup. Migrations run transactionally and are forward-only. The current baseline is version 1; future schema changes must be appended as a new migration. Roll back an incompatible release by restoring its verified pre-upgrade backup rather than attempting an in-place downgrade.
+SQLite stores maintain a `schema_migrations` ledger and validate migration names/versions at startup. Migrations run transactionally and are forward-only. The knowledge store schema is currently version 2; future schema changes must be appended as a new migration. Roll back an incompatible release by restoring its verified pre-upgrade backup rather than attempting an in-place downgrade.
 
 Create, verify, and restore a complete local backup:
 
@@ -386,7 +405,71 @@ curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/retrieval-evaluation
 
 The evaluator reports per-case Recall@K, reciprocal rank, first relevant rank, matched sources, and latency, plus aggregate mean Recall@K, MRR, mean latency, p95 latency, embedding time, and total runtime. An expected source with no `pages` accepts any hit from its document; when pages are supplied, at least one cited page must overlap.
 
-LangChain is intentionally not required by the search core. It would not accelerate vector search or model inference and would add adapters and serialization on this already-complete path. The useful integration point is an optional phase-6 retriever/chain adapter, when query rewriting, multi-route retrieval, external tools, or replaceable orchestration graphs justify its components. Indexing, filters, citations, evaluation, permissions, and limits should remain owned by this service.
+### Advanced retrieval
+
+Table chunks carry normalized headers, rows, and cell coordinates. Their embedding text repeats each row as `header=value`, while the original Markdown remains available. Combine semantic search with row-level constraints:
+
+```json
+{
+  "query": "What is the X100 price?",
+  "kinds": ["table"],
+  "table_filters": {"Model": "X100", "Unit": "USD"}
+}
+```
+
+Set `rewrite_query: true` to remove common conversational prefixes, split bounded compound questions, batch their embeddings, retrieve up to five routes concurrently, deduplicate, and rank them with reciprocal-rank fusion. Search responses expose `query_variants`, `matched_queries`, semantic score, fusion score, and route count. Retrieval evaluation accepts `compare_rewrite: true` and reports baseline Recall@K/MRR/latency plus deltas, so query rewriting must demonstrate measurable value rather than being enabled by assumption.
+
+Install the `rag-langchain` extra, configure `PDF_INSPECTOR_RERANK_PROVIDER=flashrank`, and send `"rerank": true` to apply a local second-stage reranker. RRF first returns up to `RERANK_CANDIDATES`; FlashRank scores the smaller child chunks and returns at most `RERANK_TOP_N`; only then does RAG restore parent context. Results retain `original_rank`, semantic/fusion scores, `rerank_score`, and a trace showing whether reranking was applied. Initialization errors, inference errors, and timeouts fail open to the original RRF order and increment fallback metrics.
+
+Use `"compare_rerank": true` on retrieval evaluations to compare Recall@K, MRR, and latency against the same pipeline without reranking. A rollout should keep Recall@5 at or above baseline, improve MRR or nDCG on the versioned evaluation set, and keep p95 added latency within the configured budget.
+
+The storage and retrieval implementation remains framework-independent. When another LangChain component needs this knowledge source, expose it as a standard Runnable without copying vectors or changing citations:
+
+```python
+runnable = app.state.knowledge.as_langchain_runnable(
+    knowledge_base_id,
+    top_k=5,
+    min_score=0.2,
+    document_ids=[],
+    page_start=None,
+    page_end=None,
+    kinds=[],
+    section_path_prefix=[],
+    rerank=True,
+)
+documents = runnable.invoke("What is the X100 purchase price?")
+```
+
+Every child chunk stores a deterministic parent section ID and its complete section context. Retrieval ranks the smaller child, while RAG uses the parent text and inherited page range. Multiple children from one parent are collapsed before context budgeting, preventing repeated sections from consuming the prompt.
+
+Create traceable document versions by supplying version and validity metadata during ingestion:
+
+```json
+{
+  "task_id": "TASK_ID",
+  "document_key": "employee-policy",
+  "version": "2026.2",
+  "effective_from": "2026-06-01T00:00:00+00:00"
+}
+```
+
+Submitting changed content with explicit version metadata archives the previous revision without deleting its chunks or vectors. Normal search returns only the current effective revision. Use `versions`, `as_of`, or `include_historical` to retrieve older evidence; every result and citation includes its version.
+
+Each RAG answer returns an `answer_id` and is stored with its question, citations, retrieval trace, and refusal state. Record useful/incorrect citations and an optional correction:
+
+```json
+{
+  "answer_id": "ANSWER_ID",
+  "helpful": true,
+  "valid_citation_ids": ["CHUNK_ID"],
+  "invalid_citation_ids": [],
+  "correction": "Optional corrected answer"
+}
+```
+
+Feedback summaries report helpful rate, citation precision, and refusal rate and accept `created_from`/`created_to` windows for before/after comparisons. The evaluation-case export removes email addresses and phone numbers and converts validated citations into expected document/page evidence. Feed those cases into the retrieval evaluator to compare Recall@K and MRR across changes.
+
+LangChain Core remains an optional boundary rather than the owner of retrieval. It standardizes interoperability through a Runnable, while indexing, filters, RRF, reranking fallback, citations, evaluation, permissions, and limits remain owned by this service. LangGraph and full agent orchestration are deliberately excluded from this lightweight stage.
 
 ### Grounded RAG answers
 
@@ -439,6 +522,10 @@ Set `"stream": true` to receive Server-Sent Events. The stream emits `metadata`,
 | `POST` | `/v1/knowledge-bases/{id}/search` | Search indexed chunks with metadata filters |
 | `POST` | `/v1/knowledge-bases/{id}/retrieval-evaluations` | Evaluate Recall@K, MRR, and latency |
 | `POST` | `/v1/knowledge-bases/{id}/ask` | Return a grounded answer or SSE stream with citations |
+| `POST` | `/v1/knowledge-bases/{id}/feedback` | Record answer and citation feedback |
+| `GET` | `/v1/knowledge-bases/{id}/feedback` | List feedback |
+| `GET` | `/v1/knowledge-bases/{id}/feedback/summary` | Compare answer-quality metrics by time window |
+| `GET` | `/v1/knowledge-bases/{id}/feedback/evaluation-cases` | Export redacted retrieval evaluation cases |
 | `PATCH` | `/v1/knowledge-bases/{id}` | Update name or description |
 | `DELETE` | `/v1/knowledge-bases/{id}` | Delete a knowledge base and its index |
 | `POST` | `/v1/knowledge-bases/{id}/documents` | Ingest a completed PDF task |

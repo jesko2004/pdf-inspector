@@ -42,6 +42,13 @@ class Settings:
     search_rate_limit_per_minute: int = 120
     ask_rate_limit_per_minute: int = 30
     max_active_tasks: int = 100
+    query_aliases: tuple[tuple[str, str], ...] = ()
+    rerank_provider: str = "none"
+    rerank_model: str = "ms-marco-MultiBERT-L-12"
+    rerank_candidates: int = 12
+    rerank_top_n: int = 5
+    rerank_max_length: int = 256
+    rerank_timeout_ms: int = 500
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -107,6 +114,21 @@ class Settings:
             os.environ.get("PDF_INSPECTOR_ASK_RATE_LIMIT_PER_MINUTE", "30")
         )
         max_active_tasks = int(os.environ.get("PDF_INSPECTOR_MAX_ACTIVE_TASKS", "100"))
+        query_aliases_raw = os.environ.get("PDF_INSPECTOR_QUERY_ALIASES_JSON", "{}")
+        rerank_provider = (
+            os.environ.get("PDF_INSPECTOR_RERANK_PROVIDER", "none").strip().lower()
+        )
+        rerank_model = os.environ.get(
+            "PDF_INSPECTOR_RERANK_MODEL", "ms-marco-MultiBERT-L-12"
+        ).strip()
+        rerank_candidates = int(os.environ.get("PDF_INSPECTOR_RERANK_CANDIDATES", "12"))
+        rerank_top_n = int(os.environ.get("PDF_INSPECTOR_RERANK_TOP_N", "5"))
+        rerank_max_length = int(
+            os.environ.get("PDF_INSPECTOR_RERANK_MAX_LENGTH", "256")
+        )
+        rerank_timeout_ms = int(
+            os.environ.get("PDF_INSPECTOR_RERANK_TIMEOUT_MS", "500")
+        )
         ocr_command = None
         if ocr_command_raw:
             parsed = json.loads(ocr_command_raw)
@@ -225,6 +247,47 @@ class Settings:
             raise ValueError("PDF_INSPECTOR_ASK_RATE_LIMIT_PER_MINUTE must be positive")
         if max_active_tasks < 1:
             raise ValueError("PDF_INSPECTOR_MAX_ACTIVE_TASKS must be positive")
+        try:
+            parsed_query_aliases = json.loads(query_aliases_raw)
+        except json.JSONDecodeError as exc:
+            raise ValueError(
+                "PDF_INSPECTOR_QUERY_ALIASES_JSON must be valid JSON"
+            ) from exc
+        if not isinstance(parsed_query_aliases, dict):
+            raise ValueError(  # noqa: TRY004 - environment configuration is invalid
+                "PDF_INSPECTOR_QUERY_ALIASES_JSON must be a JSON object"
+            )
+        query_aliases = []
+        for alias, expansion in parsed_query_aliases.items():
+            if not all(
+                isinstance(value, str) and value.strip() for value in (alias, expansion)
+            ):
+                raise ValueError(
+                    "query aliases and expansions must be non-empty strings"
+                )
+            query_aliases.append((alias.strip(), expansion.strip()))
+        if rerank_provider not in {"none", "flashrank"}:
+            raise ValueError(
+                "PDF_INSPECTOR_RERANK_PROVIDER must be one of: none, flashrank"
+            )
+        if not rerank_model:
+            raise ValueError("PDF_INSPECTOR_RERANK_MODEL must not be empty")
+        if not 2 <= rerank_candidates <= 100:
+            raise ValueError(
+                "PDF_INSPECTOR_RERANK_CANDIDATES must be between 2 and 100"
+            )
+        if not 1 <= rerank_top_n <= rerank_candidates:
+            raise ValueError(
+                "PDF_INSPECTOR_RERANK_TOP_N must be between 1 and RERANK_CANDIDATES"
+            )
+        if not 32 <= rerank_max_length <= 512:
+            raise ValueError(
+                "PDF_INSPECTOR_RERANK_MAX_LENGTH must be between 32 and 512"
+            )
+        if not 10 <= rerank_timeout_ms <= 30000:
+            raise ValueError(
+                "PDF_INSPECTOR_RERANK_TIMEOUT_MS must be between 10 and 30000"
+            )
         return cls(
             data_dir=data_dir,
             builtin_profile_dir=profile_dir,
@@ -256,6 +319,13 @@ class Settings:
             search_rate_limit_per_minute=search_rate_limit,
             ask_rate_limit_per_minute=ask_rate_limit,
             max_active_tasks=max_active_tasks,
+            query_aliases=tuple(query_aliases),
+            rerank_provider=rerank_provider,
+            rerank_model=rerank_model,
+            rerank_candidates=rerank_candidates,
+            rerank_top_n=rerank_top_n,
+            rerank_max_length=rerank_max_length,
+            rerank_timeout_ms=rerank_timeout_ms,
         )
 
     @property
@@ -281,6 +351,10 @@ class Settings:
     @property
     def audit_database_path(self) -> Path:
         return self.data_dir / "audit.sqlite3"
+
+    @property
+    def rerank_cache_dir(self) -> Path:
+        return self.data_dir / "models" / "flashrank"
 
     def create_directories(self) -> None:
         for path in (
