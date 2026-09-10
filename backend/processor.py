@@ -126,6 +126,41 @@ def process_document(
     completed_ocr_pages = sorted(set(completed_ocr_pages))
     unresolved_ocr_pages = sorted(set(requested_ocr_pages) - set(completed_ocr_pages))
 
+    # Optional local provider capability for sparse native text over image
+    # covers. Keep its provenance separate from whole-page OCR replacement.
+    supplemented_pages: list[int] = []
+    supplement_unresolved_pages: list[int] = []
+    supplement_error = None
+    supplement = getattr(ocr_provider, 'extract_supplements', None)
+    native_pages = [
+        page['page'] for page in pages
+        if page['page'] not in requested_ocr_pages and page['markdown'].strip()
+    ]
+    if callable(supplement) and native_pages:
+        supplement_started = perf_counter()
+        try:
+            for addition in supplement(pdf_path, native_pages):
+                if addition.page not in native_pages or addition.page in supplemented_pages:
+                    continue
+                if not addition.markdown.strip():
+                    supplement_unresolved_pages.append(addition.page)
+                    continue
+                page = pages_by_number[addition.page]
+                page.update(
+                    markdown=addition.markdown.strip() + '\n\n' + page['markdown'].strip() + '\n',
+                    extraction_method='native+ocr',
+                    ocr_confidence=addition.confidence,
+                )
+                supplemented_pages.append(addition.page)
+        except Exception as exc:  # noqa: BLE001 - preserve native output on failure
+            supplement_error = {'code': type(exc).__name__, 'message': str(exc)}
+        finally:
+            if metrics is not None:
+                metrics.observe(
+                    'ocr_supplement', perf_counter() - supplement_started,
+                    'error' if supplement_error or supplement_unresolved_pages else 'success',
+                )
+
     markdown = _document_markdown(pages)
     scoped = _region_markdown(pdf_path, profile, engine)
     extraction = extract_fields(markdown, profile, scoped)
@@ -137,6 +172,14 @@ def process_document(
     )
 
     document_issues = []
+    if supplement_error or supplement_unresolved_pages:
+        document_issues.append({
+            'reason': 'ocr_supplement_failed' if supplement_error else 'ocr_supplement_empty',
+            'pages': sorted(set(supplement_unresolved_pages)),
+            'message': '图像文字补充检查失败或未识别出可用文字；已保留原生内容，需要人工复核。',
+            'error': supplement_error,
+        })
+        extraction['status'] = 'needs_review'
     if unresolved_ocr_pages:
         document_issues.append(
             {
@@ -172,6 +215,9 @@ def process_document(
             "completed_pages": completed_ocr_pages,
             "unresolved_pages": unresolved_ocr_pages,
             "error": ocr_error,
+            "supplemented_pages": sorted(supplemented_pages),
+            "supplement_unresolved_pages": sorted(set(supplement_unresolved_pages)),
+            "supplement_error": supplement_error,
         },
         "tables": tables,
         "chunks": chunks,

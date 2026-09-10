@@ -19,6 +19,23 @@ use super::postprocess::clean_markdown;
 use super::preprocess::{merge_drop_caps, merge_heading_lines};
 use super::{item_is_in_chart_region, MarkdownOptions, CHART_SEPARATOR_PAD};
 
+/// Insert a line-wrap separator without breaking Chinese/Japanese words.
+/// Hangul, Latin, numbers, and explicit source spaces keep their boundaries.
+fn append_wrapped_line_separator(output: &mut String, next: &str) {
+    let unspaced = |c: char| {
+        matches!(c,
+        '\u{3001}'..='\u{303F}' | '\u{3041}'..='\u{30FF}'
+        | '\u{3400}'..='\u{4DBF}' | '\u{4E00}'..='\u{9FFF}'
+        | '\u{F900}'..='\u{FAFF}' | '\u{20000}'..='\u{2FA1F}'
+        | '，' | '！' | '？' | '；' | '：' | '（' | '）')
+    };
+    if !(output.chars().next_back().is_some_and(unspaced)
+        && next.chars().next().is_some_and(unspaced))
+    {
+        output.push(' ');
+    }
+}
+
 /// Logical stream geometry for a page where one full-width chart separates
 /// two prose columns. Positioned non-text blocks use this same ordering so a
 /// right-column table or image cannot jump ahead of left-column prose.
@@ -1196,10 +1213,10 @@ pub(super) fn to_markdown_from_lines_with_tables_images_and_page_count(
             };
 
             if is_continuation {
-                // Append to previous list item with a space
+                // Append the wrapped continuation to the previous list item.
                 if output.ends_with('\n') {
                     output.pop();
-                    output.push(' ');
+                    append_wrapped_line_separator(&mut output, trimmed);
                 }
                 output.push_str(trimmed);
                 output.push('\n');
@@ -1246,7 +1263,7 @@ pub(super) fn to_markdown_from_lines_with_tables_images_and_page_count(
             if cur_dot_leaders || prev_had_dot_leaders {
                 output.push('\n');
             } else {
-                output.push(' ');
+                append_wrapped_line_separator(&mut output, trimmed);
             }
         }
         output.push_str(trimmed);
@@ -1529,7 +1546,7 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
                 // Append to previous list item with a space
                 if output.ends_with('\n') {
                     output.pop();
-                    output.push(' ');
+                    append_wrapped_line_separator(&mut output, trimmed);
                 }
                 output.push_str(trimmed);
                 output.push('\n');
@@ -1561,7 +1578,7 @@ pub fn to_markdown_from_lines(lines: Vec<TextLine>, options: MarkdownOptions) ->
             if cur_dot_leaders || prev_had_dot_leaders {
                 output.push('\n');
             } else {
-                output.push(' ');
+                append_wrapped_line_separator(&mut output, trimmed);
             }
         }
         output.push_str(trimmed);
@@ -1638,6 +1655,43 @@ mod tests {
         let mut item = make_item(text, page, None);
         item.y = y;
         make_line(vec![item])
+    }
+
+    #[test]
+    fn wrapped_chinese_words_keep_boundaries_in_both_conversion_paths() {
+        for (first, second, expected) in [
+            ("请保留证据页", "码以便核对。", "请保留证据页码以便核对。"),
+            (
+                "设备检查已完成。",
+                "记录需要保留。",
+                "设备检查已完成。记录需要保留。",
+            ),
+            (
+                "Keep the source",
+                "page for review.",
+                "Keep the source page for review.",
+            ),
+            ("검사 기록을", "보관합니다", "검사 기록을 보관합니다"),
+            ("Reference 123", "456", "Reference 123 456"),
+        ] {
+            let lines = vec![line_at(first, 1, 700.0), line_at(second, 1, 686.0)];
+            let options = MarkdownOptions {
+                detect_headers: false,
+                ..Default::default()
+            };
+            let plain = to_markdown_from_lines(lines.clone(), options.clone());
+            let positioned = to_markdown_from_lines_with_tables_and_images(
+                lines,
+                options,
+                HashMap::new(),
+                HashMap::new(),
+                &HashMap::new(),
+                &HashSet::new(),
+                None,
+            );
+            assert!(plain.contains(expected), "{plain}");
+            assert!(positioned.contains(expected), "{positioned}");
+        }
     }
 
     #[test]

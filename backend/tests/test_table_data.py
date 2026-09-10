@@ -49,6 +49,16 @@ class TableDataTests(unittest.TestCase):
         self.assertEqual(3, table["row_sources"][0]["page"])
         self.assertIn("服务器,2,件,12500.00", table_to_csv(table))
 
+    def test_usd_code_and_dollar_symbol_preserve_numeric_amount(self):
+        for raw in ("USD $950.00", "USD 950.00", "$950.00"):
+            with self.subTest(raw=raw):
+                markdown = f"| Item | Qty | 单位 | 单价 |\n|---|---|---|---|\n| Support | 1 | PCS | {raw} |"
+                result = extract_business_tables([(1, markdown)], self.profile)
+                self.assertEqual("ready", result["status"])
+                self.assertEqual("950.00", result["items"][0]["rows"][0]["unit_price"])
+        invalid = "| Item | Qty | 单位 | 单价 |\n|---|---|---|---|\n| Support | 1 | PCS | USD $$950.00 |"
+        self.assertEqual("needs_review", extract_business_tables([(1, invalid)], self.profile)["status"])
+
     def test_invalid_required_cell_and_missing_table_need_review(self):
         invalid = """| 品名 | 数量 | 单位 | 单价 |
 |---|---|---|---|

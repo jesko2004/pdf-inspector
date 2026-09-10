@@ -16,11 +16,21 @@
 
 **®** **Thermodynamic Properties of Freon 12 Refrigerant** **(R-12)** **SI Units**
 
-Tables of the thermodynamic **Units** properties of R-12 have been developed and are presented here. P = Pressure in kPa. Absolute This information is based on values calculated using the NIST REFPROP T = Temperature in Celcius Database (McLinden, M.O., Klein,
+Tables of the thermodynamic properties of R-12 have been developed and are presented here. This information is based on values calculated using the NIST REFPROP Database (McLinden, M.O., Klein,
 
-S.A., Lemmon, E.W., and Peskin, Vf = Fluid (liquid) specific volume
-A.P., NIST Standard Reference in cubic meters per kilogram Database 23, NIST thermodynamic and transport properties of Vg = Vapour (gas) specific volume refrigerants and refrigerant in cubic meters per kilogram mixtures – REFPROP version 6.01, Standard Reference Data Program, df and dg = Fluid and Vapour National Institute of Standards and (respectively) densities in Technology, 1998).
-kilograms per cubic meter
+S.A., Lemmon, E.W., and Peskin,
+A.P., NIST Standard Reference Database 23, NIST thermodynamic and transport properties of refrigerants and refrigerant mixtures – REFPROP version 6.01, Standard Reference Data Program, National Institute of Standards and Technology, 1998).
+##### Units
+
+##### P = Pressure in kPa. Absolute
+
+##### T = Temperature in Celcius
+
+Vf = Fluid (liquid) specific volume in cubic meters per kilogram
+
+Vg = Vapour (gas) specific volume in cubic meters per kilogram
+
+df and dg = Fluid and Vapour (respectively) densities in kilograms per cubic meter
 
 ##### H = Enthalpy (kJ/kg)
 
@@ -34,10 +44,8 @@ kilograms per cubic meter
 |Boiling Point At one atmosphere|-29.75°C|
 |Critical Temperature|111.97°C|
 |Critical Pressure|4136 kPa|
-|Critical Density|565.0 kg/m|
-|Critical Volume|0.0018 m|
-
-/kg
+|Critical Density|565.0 kg/m³|
+|Critical Volume|0.0018 m³/kg|
 
 l
 

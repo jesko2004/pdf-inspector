@@ -1213,6 +1213,78 @@ enum GridResult {
     Failed,
 }
 
+/// Recover aligned, unshaded column labels above a short shaded grid.
+fn unshaded_header_top(
+    items: &[TextItem],
+    x_edges: &[f32],
+    y_edges: &[f32],
+    page: u32,
+) -> Option<f32> {
+    // A header plus one data row and a total is common in short invoices.
+    // Only recover a missing header when two shaded rows define the grid,
+    // every column has a short aligned label above it, and the first body
+    // row independently supplies data in every column.
+    if y_edges.len() != 3 || !(4..=11).contains(&x_edges.len()) {
+        return None;
+    }
+    let top = y_edges[2];
+    let row_height = top - y_edges[1];
+    if !(8.0..=40.0).contains(&row_height) {
+        return None;
+    }
+    let mut labels = Vec::new();
+    for col in x_edges.windows(2) {
+        let header: Vec<&TextItem> = items
+            .iter()
+            .filter(|it| {
+                let center = it.x + it.width / 2.0;
+                it.page == page
+                    && center > col[0]
+                    && center < col[1]
+                    && it.y > top + 2.0
+                    && it.y < top + row_height
+            })
+            .collect();
+        if header.len() != 1 {
+            return None;
+        }
+        let label = header[0];
+        if label.text.chars().count() > 40
+            || !label.text.chars().any(|c| c.is_alphabetic())
+            || label.x < col[0] - 2.0
+            || label.x + label.width > col[1] + 2.0
+        {
+            return None;
+        }
+        if !items.iter().any(|it| {
+            let center = it.x + it.width / 2.0;
+            it.page == page
+                && center > col[0]
+                && center < col[1]
+                && it.y > y_edges[1] + 2.0
+                && it.y < top - 2.0
+                && !it.text.trim().is_empty()
+        }) {
+            return None;
+        }
+        labels.push(label);
+    }
+    let low = labels.iter().map(|it| it.y).fold(f32::INFINITY, f32::min);
+    let high = labels
+        .iter()
+        .map(|it| it.y)
+        .fold(f32::NEG_INFINITY, f32::max);
+    if high - low > 3.0 {
+        return None;
+    }
+    Some(
+        labels
+            .iter()
+            .map(|it| it.y + it.height.max(3.0))
+            .fold(f32::NEG_INFINITY, f32::max),
+    )
+}
+
 /// Core grid-building logic.  `skip_rects[i]` marks rects to exclude from
 /// X-edge extraction and propagate_merged_cells (but they're still used for
 /// fill-ratio checking).  When `strict` is true, apply higher thresholds
@@ -1239,7 +1311,11 @@ fn try_build_grid(
     }
 
     let x_edges = snap_edges(&x_edges, 6.0);
-    let y_edges = snap_edges(&y_edges, 6.0);
+    let mut y_edges = snap_edges(&y_edges, 6.0);
+    if let Some(top) = unshaded_header_top(items, &x_edges, &y_edges, page) {
+        y_edges.push(top);
+        debug!("  recovered unshaded header above two-row cell grid");
+    }
 
     debug!(
         "  edges: {} x, {} y — grid {}x{}",
@@ -1372,6 +1448,11 @@ fn try_build_grid(
             "  rejected: content ratio {:.2} < {:.2} ({} non-empty / {} total)",
             content_ratio, min_content, non_empty_cells, total_cells as u32
         );
+        return GridResult::Failed;
+    }
+
+    if has_dominant_prose_cell(&cells) {
+        debug!("  rejected: dominant prose cell in rectangle grid");
         return GridResult::Failed;
     }
 
@@ -2986,6 +3067,69 @@ mod tests {
             item_type: ItemType::Text,
             mcid: None,
         }
+    }
+
+    #[test]
+    fn short_shaded_grid_recovers_unshaded_header_and_keeps_four_columns() {
+        let mut items = Vec::new();
+        let mut rects = Vec::new();
+        for (c, (header, value)) in [
+            ("Description", "Support"),
+            ("From", "2016"),
+            ("Until", "2017"),
+            ("Amount", "$950"),
+        ]
+        .iter()
+        .enumerate()
+        {
+            let x = 50.0 + c as f32 * 100.0;
+            items.push(make_item(header, x + 4.0, 407.0, 11.0));
+            items.push(make_item(value, x + 4.0, 387.0, 11.0));
+            rects.push((x, 380.0, 100.0, 20.0));
+        }
+        items.push(make_item("Total", 54.0, 367.0, 11.0));
+        items.push(make_item("$950", 354.0, 367.0, 11.0));
+        rects.extend([(50.0, 360.0, 300.0, 20.0), (350.0, 360.0, 100.0, 20.0)]);
+        let GridResult::Ok(table) = try_build_grid(&items, &rects, 1, &[false; 6], false) else {
+            panic!("short shaded table with aligned header must be recognized");
+        };
+        assert_eq!(table.cells[0], ["Description", "From", "Until", "Amount"]);
+        assert_eq!(table.cells[1], ["Support", "2016", "2017", "$950"]);
+        assert_eq!(table.cells[2], ["Total", "", "", "$950"]);
+        // A missing label or a label on another page is not sufficient evidence.
+        items[0].page = 2;
+        assert!(unshaded_header_top(
+            &items,
+            &[50.0, 150.0, 250.0, 350.0, 450.0],
+            &[360.0, 380.0, 400.0],
+            1
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn rectangle_grid_cannot_swallow_a_full_prose_page() {
+        let mut rects = Vec::new();
+        let mut items = Vec::new();
+        for row in 0..3 {
+            for column in 0..2 {
+                let x = 40.0 + column as f32 * 240.0;
+                let y = 100.0 + row as f32 * 200.0;
+                rects.push((x, y, 240.0, 200.0));
+                let text = if row == 0 && column == 0 {
+                    "A complete sentence belongs to ordinary explanatory body prose. ".repeat(12)
+                } else {
+                    "Label".into()
+                };
+                let mut item = make_item(&text, x + 10.0, y + 30.0, 10.0);
+                item.width = 210.0;
+                items.push(item);
+            }
+        }
+        assert!(matches!(
+            try_build_grid(&items, &rects, 1, &vec![false; rects.len()], false),
+            GridResult::Failed
+        ));
     }
 
     // --- is_chart_bar_cluster / detect_chart_regions ---

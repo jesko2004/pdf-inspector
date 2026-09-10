@@ -783,6 +783,37 @@ pub(crate) fn merge_text_items(items: Vec<TextItem>) -> Vec<TextItem> {
         return items;
     }
 
+    // Synthetic bold can paint consecutive identical operands with a tiny
+    // offset. Remove the second paint before joining fragments, otherwise
+    // repeated operands get interleaved into words. Do not deduplicate text
+    // in separate positions, semantic spans, links, or form fields.
+    let mut distinct: Vec<TextItem> = Vec::with_capacity(items.len());
+    for item in items {
+        let overprint = distinct.last().is_some_and(|previous| {
+            let tolerance = (item.font_size * 0.025).min(1.0);
+            matches!(item.item_type, ItemType::Text)
+                && matches!(previous.item_type, ItemType::Text)
+                && !item.text.trim().is_empty()
+                && item.width > 0.0
+                && item.text == previous.text
+                && item.page == previous.page
+                && item.font == previous.font
+                && item.mcid == previous.mcid
+                && item.is_bold == previous.is_bold
+                && item.is_italic == previous.is_italic
+                && item.is_underline == previous.is_underline
+                && item.is_strikeout == previous.is_strikeout
+                && (item.font_size - previous.font_size).abs() < 0.01
+                && (item.width - previous.width).abs() < 0.01
+                && (item.y - previous.y).abs() <= tolerance
+                && (item.x - previous.x).abs() <= tolerance.min(item.width * 0.1)
+        });
+        if !overprint {
+            distinct.push(item);
+        }
+    }
+    let items = distinct;
+
     // Group items by (page, Y position) with 5pt tolerance
     let y_tolerance = 5.0;
     let mut line_groups: Vec<(u32, f32, Vec<&TextItem>)> = Vec::new();
@@ -941,13 +972,31 @@ pub(crate) fn merge_subscript_items(items: Vec<TextItem>) -> Vec<TextItem> {
 
     // Group items by (page, approximate Y) with generous tolerance to capture
     // both the parent line and the subscript/superscript offset.
-    let y_tolerance = 5.0;
     let mut line_groups: Vec<(u32, f32, Vec<TextItem>)> = Vec::new();
 
     for item in items {
-        let found = line_groups
-            .iter_mut()
-            .find(|(pg, y, _)| *pg == item.page && (item.y - *y).abs() < y_tolerance);
+        let found = line_groups.iter_mut().find(|(pg, y, group)| {
+            // A superscript can be more than 5pt above an 11pt baseline.
+            // Scale by the larger font so grouping works even when the
+            // smaller, raised item occurs first in the content stream.
+            let font_size = group
+                .iter()
+                .map(|i| i.font_size)
+                .fold(item.font_size, f32::max);
+            let is_script = |it: &TextItem| {
+                it.font_size > 0.0
+                    && it.font_size < font_size * 0.75
+                    && !it.text.is_empty()
+                    && it.text.len() <= 4
+                    && it.text.chars().all(|c| c.is_ascii_digit())
+            };
+            let tolerance = if is_script(&item) || group.iter().any(is_script) {
+                (font_size * 0.5).max(5.0)
+            } else {
+                5.0
+            };
+            *pg == item.page && (item.y - *y).abs() < tolerance
+        });
         if let Some((_, _, group)) = found {
             group.push(item);
         } else {
@@ -1833,6 +1882,59 @@ mod tests {
     }
 
     #[test]
+    fn test_merge_synthetic_bold_overprints_before_joining() {
+        let mut items = Vec::new();
+        for (text, x, width) in [
+            ("In", 56.7, 24.4),
+            ("v", 80.7, 12.8),
+            ("oic", 93.4, 34.7),
+            ("e", 128.2, 14.4),
+        ] {
+            let mut item = make_item(text, x, 750.0, width);
+            item.font_size = 33.0;
+            item.height = 33.0;
+            items.push(item.clone());
+            item.x += 0.66;
+            items.push(item);
+        }
+        let merged = merge_text_items(items);
+        assert_eq!(
+            merged.iter().map(|i| i.text.as_str()).collect::<String>(),
+            "Invoice"
+        );
+    }
+
+    #[test]
+    fn test_merge_preserves_repeated_text_with_distinct_geometry_or_semantics() {
+        for (dx, dy, other_page, other_mcid, form) in [
+            (10.0, 0.0, false, false, false),
+            (0.0, 14.0, false, false, false),
+            (0.0, 0.0, true, false, false),
+            (0.0, 0.0, false, true, false),
+            (0.0, 0.0, false, false, true),
+        ] {
+            let first = make_item("00", 50.0, 500.0, 10.0);
+            let mut second = first.clone();
+            second.x += dx;
+            second.y += dy;
+            if other_page {
+                second.page = 2;
+            }
+            if other_mcid {
+                second.mcid = Some(1);
+            }
+            if form {
+                second.item_type = ItemType::FormField;
+            }
+            let text = merge_text_items(vec![first, second])
+                .iter()
+                .map(|i| i.text.as_str())
+                .collect::<String>();
+            assert_eq!(text.chars().filter(|c| *c == '0').count(), 4);
+        }
+    }
+
+    #[test]
     fn test_detect_two_columns() {
         let mut items = Vec::new();
         // Left column at x=72, right column at x=350, gutter ~278-350
@@ -2215,6 +2317,32 @@ mod tests {
         let merged = merge_subscript_items(items);
         assert_eq!(merged.len(), 1);
         assert_eq!(merged[0].text, "word²");
+    }
+
+    #[test]
+    fn test_merge_superscript_unit_above_five_points_in_either_order() {
+        for raised_first in [false, true] {
+            let parent = make_item_fs("565.0 kg/m", 278.25, 117.0, 66.0, 11.25);
+            let script = make_item_fs("3", 343.5, 122.25, 4.5, 6.75);
+            let items = if raised_first {
+                vec![script, parent]
+            } else {
+                vec![parent, script]
+            };
+            let merged = merge_subscript_items(items);
+            assert_eq!(merged.len(), 1);
+            assert_eq!(merged[0].text, "565.0 kg/m³");
+        }
+    }
+
+    #[test]
+    fn test_merge_superscript_does_not_absorb_next_line_or_page() {
+        for (y, page) in [(130.5, 1), (122.25, 2)] {
+            let parent = make_item_fs("kg/m", 278.25, 117.0, 66.0, 11.25);
+            let mut script = make_item_fs("3", 343.5, y, 4.5, 6.75);
+            script.page = page;
+            assert_eq!(merge_subscript_items(vec![parent, script]).len(), 2);
+        }
     }
 
     #[test]

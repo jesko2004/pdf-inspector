@@ -102,6 +102,7 @@ class RapidOcrProvider:
         self._lock = threading.Lock()
 
     def _load_dependencies(self) -> tuple[Any, Callable[[str], Any]]:
+        document_opener = self._load_document_opener()
         with self._lock:
             if self._engine is None:
                 try:
@@ -112,6 +113,10 @@ class RapidOcrProvider:
                         "RapidOCR or its ONNX runtime is not installed; run "
                         "`pip install -e \".[backend,ocr]\"`"
                     ) from exc
+        return self._engine, document_opener
+
+    def _load_document_opener(self) -> Callable[[str], Any]:
+        with self._lock:
             if self._document_opener is None:
                 try:
                     import pymupdf
@@ -120,7 +125,7 @@ class RapidOcrProvider:
                         "PyMuPDF is not installed; run `pip install -e \".[backend,ocr]\"`"
                     ) from exc
                 self._document_opener = pymupdf.open
-        return self._engine, self._document_opener
+        return self._document_opener
 
     @staticmethod
     def _output_rows(output: Any) -> list[tuple[Any, str, float]]:
@@ -150,13 +155,28 @@ class RapidOcrProvider:
         ys = [float(point[1]) for point in points]
         return min(ys), min(xs), max(ys) - min(ys)
 
-    def _recognize(self, image: bytes) -> tuple[str, float | None]:
+    def _recognize(
+        self, image: bytes, excluded_boxes: list[tuple[float, float, float, float]] | None = None
+    ) -> tuple[str, float | None]:
         assert self._engine is not None
         output = self._engine(image, text_score=self.min_confidence)
         rows = []
         for box, text, score in self._output_rows(output):
             text = text.strip()
             if text and score >= self.min_confidence:
+                xs = [float(point[0]) for point in box]
+                ys = [float(point[1]) for point in box]
+                x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
+                area = max(0.0, x1 - x0) * max(0.0, y1 - y0)
+                # Spatial exclusion preserves repeated words in distinct places.
+                # Do not remove an OCR line that extends substantially beyond
+                # a native span: it may also contain new image text.
+                if area > 0 and any(
+                    max(0.0, min(x1, right) - max(x0, left))
+                    * max(0.0, min(y1, bottom) - max(y0, top)) >= area * 0.8
+                    for left, top, right, bottom in (excluded_boxes or [])
+                ):
+                    continue
                 y, x, height = self._box_metrics(box)
                 rows.append((y, x, height, text, score))
         rows.sort(key=lambda row: (row[0], row[1]))
@@ -204,6 +224,83 @@ class RapidOcrProvider:
                     markdown, confidence = self._recognize(image)
                 if markdown:
                     results.append(OcrPage(page_number, markdown, confidence))
+            return results
+        finally:
+            document.close()
+
+    @staticmethod
+    def _cover_native_boxes(page: Any) -> list[tuple[float, float, float, float]]:
+        """Select sparse marginal text over a dominant image, not body pages.
+
+        Coordinates come from displayed image bounds, not pixel dimensions of
+        an unused image resource. Deliberately exclude rotated/cropped pages
+        until their coordinate transforms have separate coverage.
+        """
+        if page.rotation or page.cropbox != page.mediabox:
+            return []
+        rect = page.rect
+        if rect.width <= 0 or rect.height <= 0:
+            return []
+        spans = [
+            span
+            for block in page.get_text('dict', flags=0)['blocks']
+            if block['type'] == 0
+            for line in block['lines']
+            for span in line['spans']
+            if span['text'].strip()
+        ]
+        if not spans or sum(len(span['text'].strip()) for span in spans) > 200:
+            return []
+        boxes = [tuple(span['bbox']) for span in spans]
+        # Every span must be wholly in the outer 15% margin. Even a short
+        # central paragraph prevents this supplementary OCR path.
+        for left, top, right, bottom in boxes:
+            if not (
+                right <= rect.x0 + rect.width * 0.15
+                or left >= rect.x1 - rect.width * 0.15
+                or bottom <= rect.y0 + rect.height * 0.15
+                or top >= rect.y1 - rect.height * 0.15
+            ):
+                return []
+        for image in page.get_image_info():
+            left, top, right, bottom = image['bbox']
+            visible_area = max(0.0, min(right, rect.x1) - max(left, rect.x0)) * max(
+                0.0, min(bottom, rect.y1) - max(top, rect.y0)
+            )
+            if visible_area >= rect.width * rect.height * 0.8:
+                return boxes
+        return []
+
+    def extract_supplements(self, pdf_path: Path, pages: list[int]) -> list[OcrPage]:
+        """Return only image-cover additions; an empty candidate needs review.
+
+        This optional provider hook never replaces native Markdown and is not
+        a general guarantee of image-text coverage on all native pages.
+        """
+        if not pages:
+            return []
+        document_opener = self._load_document_opener()
+        document = document_opener(str(pdf_path))
+        try:
+            results = []
+            for page_number in sorted(set(pages)):
+                if not 1 <= page_number <= document.page_count:
+                    raise ValueError('Supplement pages must be within the document')
+                page = document.load_page(page_number - 1)
+                boxes = self._cover_native_boxes(page)
+                if not boxes:
+                    continue
+                self._load_dependencies()
+                scale = self.dpi / 72
+                excluded = [
+                    ((left - 2) * scale, (top - 2) * scale,
+                     (right + 2) * scale, (bottom + 2) * scale)
+                    for left, top, right, bottom in boxes
+                ]
+                image = page.get_pixmap(dpi=self.dpi, alpha=False).tobytes('png')
+                with self._lock:
+                    markdown, confidence = self._recognize(image, excluded)
+                results.append(OcrPage(page_number, markdown, confidence))
             return results
         finally:
             document.close()

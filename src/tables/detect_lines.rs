@@ -856,7 +856,14 @@ fn build_dense_row_anchor_table(
     let numeric_cells = body_rows
         .iter()
         .flatten()
-        .filter(|cell| cell.chars().any(|character| character.is_ascii_digit()))
+        .filter(|cell| {
+            cell.chars().any(|character| character.is_ascii_digit())
+                && cell
+                    .chars()
+                    .filter(|character| character.is_alphabetic())
+                    .count()
+                    <= 2
+        })
         .count();
     let nonempty_body_cells = body_rows
         .iter()
@@ -2367,8 +2374,9 @@ mod tests {
         let mut items = Vec::new();
         for (row, y) in [505.0, 475.0, 440.0].into_iter().enumerate() {
             for (column, x) in [90.0, 200.0, 310.0, 420.0].into_iter().enumerate() {
-                let label = ["alpha", "beta", "gamma", "delta", "epsilon", "zeta"][row + column];
-                items.push(make_item(label, x, y, 1));
+                // Numbers embedded in news references are not numeric cells.
+                let label = format!("Story continues on Page {}", row + column + 1);
+                items.push(make_item(&label, x, y, 1));
             }
         }
 

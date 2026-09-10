@@ -392,6 +392,10 @@ class TestMultipleFixtures:
         [f for f in os.listdir(FIXTURES_DIR) if f.endswith(".pdf")],
     )
     def test_process_all_fixtures(self, filename):
+        if filename == "encrypted-secret123.pdf":
+            with pytest.raises(ValueError, match="encrypted"):
+                pdf_inspector.process_pdf(fixture_path(filename))
+            return
         result = pdf_inspector.process_pdf(fixture_path(filename))
         assert result.pdf_type in (
             "text_based",
