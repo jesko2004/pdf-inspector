@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import os
+from math import ceil, isfinite
 import subprocess
 import threading
 from dataclasses import dataclass
@@ -49,6 +51,7 @@ class CommandOcrProvider:
             text=True,
             encoding="utf-8",
             timeout=self.timeout_seconds,
+            creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
         )
         payload = json.loads(completed.stdout)
         entries = payload.get("pages") if isinstance(payload, dict) else payload
@@ -78,6 +81,10 @@ class OcrDependencyError(RuntimeError):
     """Raised when an explicitly selected OCR backend is not installed."""
 
 
+class OcrResourceLimitError(ValueError):
+    pass
+
+
 class RapidOcrProvider:
     """Render selected PDF pages and recognize them with local RapidOCR models."""
 
@@ -88,6 +95,7 @@ class RapidOcrProvider:
         dpi: int = 200,
         min_confidence: float = 0.5,
         *,
+        max_pixels: int = 20_000_000,
         engine: Any | None = None,
         document_opener: Callable[[str], Any] | None = None,
     ):
@@ -97,6 +105,7 @@ class RapidOcrProvider:
             raise ValueError("OCR minimum confidence must be between 0 and 1")
         self.dpi = dpi
         self.min_confidence = min_confidence
+        self.max_pixels = max_pixels
         self._engine = engine
         self._document_opener = document_opener
         self._lock = threading.Lock()
@@ -203,8 +212,7 @@ class RapidOcrProvider:
             return []
         if any(page < 1 for page in pages):
             raise ValueError("OCR pages must use positive 1-indexed page numbers")
-        engine, document_opener = self._load_dependencies()
-        self._engine = engine
+        document_opener = self._load_document_opener()
         document = document_opener(str(pdf_path))
         try:
             page_count = int(document.page_count)
@@ -216,6 +224,8 @@ class RapidOcrProvider:
             results = []
             for page_number in sorted(set(pages)):
                 page = document.load_page(page_number - 1)
+                self._check_render_budget(page)
+                self._load_dependencies()
                 pixmap = page.get_pixmap(dpi=self.dpi, alpha=False)
                 image = pixmap.tobytes("png")
                 # A service instance is shared by worker threads. Most inference
@@ -227,6 +237,16 @@ class RapidOcrProvider:
             return results
         finally:
             document.close()
+
+    def _check_render_budget(self, page: Any) -> None:
+        width, height = page.rect.width, page.rect.height
+        if not isfinite(width) or not isfinite(height) or width <= 0 or height <= 0:
+            raise OcrResourceLimitError("invalid OCR page geometry")
+        # Allow a rounding pixel at each edge before allocating a pixmap.
+        scale = self.dpi / 72
+        pixels = (ceil(width * scale) + 1) * (ceil(height * scale) + 1)
+        if pixels > self.max_pixels:
+            raise OcrResourceLimitError("OCR page exceeds configured raster pixel limit")
 
     @staticmethod
     def _cover_native_boxes(page: Any) -> list[tuple[float, float, float, float]]:
@@ -290,6 +310,7 @@ class RapidOcrProvider:
                 boxes = self._cover_native_boxes(page)
                 if not boxes:
                     continue
+                self._check_render_budget(page)
                 self._load_dependencies()
                 scale = self.dpi / 72
                 excluded = [
@@ -309,7 +330,8 @@ class RapidOcrProvider:
 def create_ocr_provider(settings: Settings) -> OcrProvider | None:
     provider = settings.ocr_provider
     if provider == "rapidocr":
-        return RapidOcrProvider(settings.ocr_dpi, settings.ocr_min_confidence)
+        return RapidOcrProvider(settings.ocr_dpi, settings.ocr_min_confidence,
+                                max_pixels=settings.ocr_max_pixels)
     if provider == "command":
         if settings.ocr_command is None:
             raise ValueError(

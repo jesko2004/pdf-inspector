@@ -45,12 +45,19 @@ Environment variables:
 |---|---:|---|
 | `PDF_INSPECTOR_DATA_DIR` | `.pdf-inspector-data` | SQLite database, uploads, results, and custom profiles |
 | `PDF_INSPECTOR_MAX_UPLOAD_MB` | `50` | Per-file upload limit |
-| `PDF_INSPECTOR_WORKERS` | `2` | In-process extraction workers |
+| `PDF_INSPECTOR_WORKERS` | `2` | Concurrent isolated PDF operations |
+| `PDF_INSPECTOR_PROCESS_TIMEOUT_SECONDS` | `300` | Wall-clock deadline including PDF worker startup |
+| `PDF_INSPECTOR_PROCESS_MEMORY_MB` | `2048` | Per-operation MiB budget; Windows aggregate job commit, POSIX per-process address space |
+| `PDF_INSPECTOR_PROCESS_MAX_RESULT_BYTES` | `33554432` | Maximum result JSON or preview PNG bytes |
+| `PDF_INSPECTOR_PDF_MAX_PAGES` | `2000` | Page-count preflight inside the isolated process |
+| `PDF_INSPECTOR_PREVIEW_TIMEOUT_SECONDS` | `15` | Deadline including single-page preview startup |
+| `PDF_INSPECTOR_PREVIEW_WORKERS` | `1` | Concurrent previews; capacity exhaustion immediately returns 429 |
+| `PDF_INSPECTOR_OCR_MAX_PIXELS` | `20000000` | Built-in OCR raster limit checked before rendering/model initialization |
 | `PDF_INSPECTOR_HOST` | `127.0.0.1` | Listen address |
 | `PDF_INSPECTOR_PORT` | `8000` | Listen port |
 | `PDF_INSPECTOR_OCR_PROVIDER` | `none` | `none`, built-in `rapidocr`, or external `command` |
 | `PDF_INSPECTOR_OCR_COMMAND_JSON` | unset | OCR adapter command as a JSON string array |
-| `PDF_INSPECTOR_OCR_TIMEOUT_SECONDS` | `180` | Per-document OCR timeout |
+| `PDF_INSPECTOR_OCR_TIMEOUT_SECONDS` | `180` | Command OCR wait limit; total PDF worker deadline also applies |
 | `PDF_INSPECTOR_OCR_DPI` | `200` | PDF render resolution for built-in RapidOCR (72-600) |
 | `PDF_INSPECTOR_OCR_MIN_CONFIDENCE` | `0.5` | Minimum RapidOCR line confidence (0-1) |
 | `PDF_INSPECTOR_VECTOR_STORE` | `sqlite` | `sqlite` for local use or `pgvector` for production |
@@ -78,7 +85,9 @@ Environment variables:
 | `PDF_INSPECTOR_RERANK_MAX_LENGTH` | `256` | Maximum query-plus-child token window used by FlashRank (32-512) |
 | `PDF_INSPECTOR_RERANK_TIMEOUT_MS` | `500` | Fail-open reranking time budget (10-30000 ms) |
 
-For multi-host deployment, replace the in-process executor and local files with a shared queue/object store. A single service process is durable across restarts: SQLite retains tasks and interrupted `processing` tasks are queued again on startup.
+The default service supervises disposable PDF/OCR and preview processes. Timeouts and shutdown terminate ordinary worker descendants; queued tasks persist for restart. Uploads and failed-task retries share the same admission limit. Preview capacity returns 429, preview timeout 504, and worker unavailability 503. See [resource budgets, platform differences and fault evidence](resource-isolation.md).
+
+For multi-host deployment, replace the local scheduling executor and local files with a shared queue/object store. A single service process is durable across restarts: SQLite retains tasks and interrupted `processing` tasks are queued again on startup.
 
 ## Minimum landing retrieval and answer contract
 

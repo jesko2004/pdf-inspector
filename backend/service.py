@@ -12,10 +12,10 @@ from uuid import uuid4
 
 from .config import Settings
 from .execution_lock import SingleExecutorLock
-from .processor import process_document
+from .process_isolation import ProcessRunner, ProcessingCancelledError
 from .profile_store import ProfileStore
 from .profiles import Profile
-from .task_store import RESULT_STATUSES, TaskStore
+from .task_store import RESULT_STATUSES, InvalidTaskStateError, TaskStore
 
 
 class UploadValidationError(ValueError):
@@ -34,17 +34,31 @@ class TaskService:
         self,
         settings: Settings,
         *,
-        processor: Processor = process_document,
+        processor: Processor | None = None,
         start_workers: bool = True,
         metrics=None,
     ):
+        if settings.ocr_provider == "command" and not settings.ocr_command:
+            raise ValueError("PDF_INSPECTOR_OCR_COMMAND_JSON is required for command OCR")
         settings.create_directories()
         self.settings = settings
         self.profiles = ProfileStore(
             settings.builtin_profile_dir, settings.custom_profile_dir
         )
         self.tasks = TaskStore(settings.database_path)
-        self.processor = processor
+        self._runner = ProcessRunner(
+            workers=settings.worker_count, memory_mb=settings.process_memory_mb,
+            max_result_bytes=settings.process_max_result_bytes,
+            temporary_dir=settings.data_dir / "work", metrics=metrics,
+        )
+        self._preview_runner = ProcessRunner(
+            workers=settings.preview_worker_count, memory_mb=settings.process_memory_mb,
+            max_result_bytes=settings.process_max_result_bytes,
+            temporary_dir=settings.data_dir / "work", metrics=metrics,
+        )
+        # Explicit injection is reserved for trusted embedding applications
+        # and unit tests. The normal HTTP/CLI path always uses the child.
+        self.processor = processor if processor is not None else self._process_isolated
         self.start_workers = start_workers
         self.metrics = metrics
         self.executor = ThreadPoolExecutor(
@@ -53,6 +67,7 @@ class TaskService:
         self._future_lock = Lock()
         self._futures = set()
         self._admission_lock = Lock()
+        self._closing = False
         self._execution_lock = (
             SingleExecutorLock(settings.data_dir / "executor.lock")
             if start_workers else None
@@ -67,6 +82,8 @@ class TaskService:
             return self._create_task(filename, stream, profile_id)
 
     def _create_task(self, filename: str, stream: BinaryIO, profile_id: str) -> dict:
+        if self._closing:
+            raise ProcessingCancelledError("task service is shutting down")
         if self.tasks.count_active() >= self.settings.max_active_tasks:
             raise CapacityExceededError("active task limit reached; retry later")
         profile = self.profiles.get(profile_id)
@@ -113,19 +130,61 @@ class TaskService:
         return json.loads(self.get_result_path(task_id).read_text(encoding="utf-8"))
 
     def retry(self, task_id: str) -> dict:
-        row = self.tasks.retry(task_id)
-        if self.start_workers:
-            self._submit(task_id)
-        return public_task(row)
+        with self._admission_lock:
+            if self._closing:
+                raise ProcessingCancelledError("task service is shutting down")
+            # Preserve 404/409 semantics before checking capacity.
+            row = self.tasks.get(task_id)
+            if row["status"] != "failed":
+                raise InvalidTaskStateError(
+                    f"only failed tasks can be retried; current status is {row['status']}"
+                )
+            if self.tasks.count_active() >= self.settings.max_active_tasks:
+                raise CapacityExceededError("active task limit reached; retry later")
+            row = self.tasks.retry(task_id)
+            if self.start_workers:
+                self._submit(task_id)
+            return public_task(row)
 
     def run_pending(self, task_id: str) -> None:
         """Run a queued task synchronously; useful for operational recovery and tests."""
         self._run_task(task_id)
 
     def close(self) -> None:
-        self.executor.shutdown(wait=True, cancel_futures=False)
+        with self._admission_lock:
+            self._closing = True
+            # Cancel queued futures before killing the active process; otherwise
+            # an executor thread could claim another row during shutdown.
+            self.executor.shutdown(wait=False, cancel_futures=True)
+        self._runner.close()
+        self._preview_runner.close()
+        # Queued rows remain durable and are recovered on the next startup.
+        self.executor.shutdown(wait=True, cancel_futures=True)
         if self._execution_lock is not None:
             self._execution_lock.close()
+
+    def _process_isolated(self, pdf_path: Path, profile: Profile) -> dict:
+        settings = self.settings
+        return self._runner.run(
+            {
+                "operation": "process", "pdf_path": str(pdf_path.resolve()),
+                "profile": profile.model_dump(mode="json"),
+                "max_pages": settings.pdf_max_pages,
+                # Model/API credentials used by retrieval never enter this file.
+                "ocr_settings": {
+                    name: getattr(settings, name) for name in (
+                        "ocr_provider", "ocr_command", "ocr_timeout_seconds",
+                        "ocr_dpi", "ocr_min_confidence", "ocr_max_pixels",
+                    )
+                },
+            }, timeout_seconds=settings.process_timeout_seconds,
+        )
+
+    def render_preview(self, pdf_path: Path, page: int) -> bytes:
+        return self._preview_runner.run(
+            {"operation": "preview", "pdf_path": str(pdf_path.resolve()), "page": page},
+            timeout_seconds=self.settings.preview_timeout_seconds, binary=True,
+        )
 
     def _save_validated_upload(self, stream: BinaryIO, destination: Path) -> None:
         size = 0
@@ -195,7 +254,7 @@ class TaskService:
             temporary.replace(destination)
             self.tasks.finish(task_id, status, str(destination))
         except Exception as exc:  # noqa: BLE001 - worker boundary records all task failures
-            self.tasks.fail(task_id, type(exc).__name__, str(exc))
+            self.tasks.fail(task_id, getattr(exc, "code", type(exc).__name__), str(exc))
 
 
 class ResultNotReadyError(ValueError):
