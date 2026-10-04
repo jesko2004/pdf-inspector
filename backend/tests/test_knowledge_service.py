@@ -220,11 +220,11 @@ class KnowledgeServiceTests(unittest.TestCase):
         )
         self.assertFalse(updated["idempotent"])
         self.assertEqual(1, updated["indexed_chunks"])
-        self.assertEqual(1, self.vectors.count(document_id=document["id"]))
+        self.assertEqual(2, self.vectors.count(document_id=document["id"]))
 
         self.service.run_pending(document["id"])
         self.assertEqual(3, len(self.factory.calls))
-        self.assertEqual(2, self.vectors.count(document_id=document["id"]))
+        self.assertEqual(3, self.vectors.count(document_id=document["id"]))
         self.assertEqual("ready", self.store.get_document(document["id"])["status"])
 
     def test_document_hash_deduplicates_across_different_keys(self):
@@ -262,7 +262,7 @@ class KnowledgeServiceTests(unittest.TestCase):
         self.assertEqual(
             ["source-new"], [item["source_chunk_id"] for item in stored_chunks]
         )
-        self.assertEqual(1, self.vectors.count(document_id=updated["id"]))
+        self.assertEqual(2, self.vectors.count(document_id=updated["id"]))
 
     def test_ingestion_normalizes_markdown_only_chunks(self):
         knowledge_base = self.create_knowledge_base()
@@ -297,7 +297,7 @@ class KnowledgeServiceTests(unittest.TestCase):
         self.assertTrue(stored["source_chunk_id"])
         self.assertEqual(markdown, vector["text"])
 
-    def test_failed_vector_cleanup_is_persisted_and_retried(self):
+    def test_update_preserves_retired_vectors_until_document_deletion(self):
         knowledge_base = self.create_knowledge_base()
         self.add_task(
             "task-cleanup-old",
@@ -316,26 +316,19 @@ class KnowledgeServiceTests(unittest.TestCase):
             b"%PDF-cleanup-new",
             [chunk("keep"), chunk("add")],
         )
-        original_delete = self.vectors.delete_chunks
-
         def fail_delete(_chunk_ids):
-            raise RuntimeError("vector database unavailable")
+            raise AssertionError("must not erase an in-flight query's vectors")
 
         self.vectors.delete_chunks = fail_delete
-        with self.assertRaisesRegex(RuntimeError, "unavailable"):
-            self.service.ingest_task(
-                knowledge_base["id"], "task-cleanup-new", "cleanup-key"
-            )
-        self.assertTrue(self.store.pending_vector_deletions())
-
-        self.vectors.delete_chunks = original_delete
         resumed = self.service.ingest_task(
             knowledge_base["id"], "task-cleanup-new", "cleanup-key"
         )
-        self.assertTrue(resumed["idempotent"])
+        self.assertFalse(resumed["idempotent"])
         self.assertEqual([], self.store.pending_vector_deletions())
         self.service.run_pending(document["id"])
-        self.assertEqual(2, self.vectors.count(document_id=document["id"]))
+        self.assertEqual(3, self.vectors.count(document_id=document["id"]))
+        self.service.delete_document(knowledge_base["id"], document["id"])
+        self.assertEqual(0, self.vectors.count())
 
     def test_reindex_and_cascade_delete(self):
         knowledge_base = self.create_knowledge_base()
@@ -367,17 +360,13 @@ class KnowledgeServiceTests(unittest.TestCase):
             kinds=[],
             section_path_prefix=[],
         )
-        self.assertEqual([], during_reindex["items"])
+        self.assertEqual(2, len(during_reindex["items"]))
+        self.assertEqual("hash-v1", during_reindex["embedding_model"])
         self.service.run_pending(document["id"])
         chunks = self.store.list_chunks(document["id"])
         self.assertTrue(all(item["embedding_model"] == "hash-v2" for item in chunks))
-        self.assertEqual(2, self.vectors.count(document_id=document["id"]))
-        self.assertTrue(
-            all(
-                item["embedding_model"] == "hash-v2"
-                for item in self.vectors.list_records(document["id"])
-            )
-        )
+        self.assertEqual(4, self.vectors.count(document_id=document["id"]))
+        self.assertEqual({"hash-v1", "hash-v2"}, {item["embedding_model"] for item in self.vectors.list_records(document["id"])})
 
         self.service.delete_document(knowledge_base["id"], document["id"])
         self.assertEqual(0, self.vectors.count())
