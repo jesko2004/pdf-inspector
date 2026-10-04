@@ -1,0 +1,142 @@
+# PDF 资料查询最小落地版本
+
+更新日期：2026-10-04。场景限定为个人在本机上传技术资料，查询参数并核对原始 PDF。已交付上传、解析、入库、混合检索、来源核对和反馈记录的工程闭环；真实语义模型质量和真实用户试用尚未验收。
+
+## 启动和使用
+
+已有原生扩展及后端依赖的本工作区可运行：
+
+```powershell
+& '.\.codex-tools\api-venv\Scripts\python.exe' -c 'from backend.server import run; run()'
+```
+
+打开 `http://127.0.0.1:8000/demo`，依次加载或创建知识库、上传 PDF、填写稳定文档标识与版本、等待入库、提问、点击引用查看原页、保存反馈。上传使用 `manual_query` 模板，不要求报价专用字段。页面中的密钥只驻留当前页面，不写入浏览器本地存储；原文件读取也经过 API 鉴权。
+
+默认 hash 向量和 extractive 回答用于离线流程演示，后者返回来源片段，不能证明理解问题。配置真实服务后新建对应模型知识库；已有知识库切换向量模型必须显式重建，不能混用向量。真实服务配置项见 [后端说明](backend.md)。
+
+部署仅承诺单进程、本地数据目录。启动时持有操作系统文件锁，第二个执行进程不能接管同一目录；崩溃后操作系统释放锁。默认监听回环地址，通过启动入口绑定非回环地址必须配置 API 密钥。直接调用 Uvicorn 等其他启动方式需要部署者自行落实同等约束。角色权限尚不包含完整租户或文档 ACL。
+
+## 本次实现
+
+| 能力 | 实现与验收范围 |
+|---|---|
+| 混合召回 | `vector`、`bm25`、`hybrid` 三种模式；向量与 BM25 各自召回，RRF 融合，再可选重排 |
+| BM25 一致范围 | 使用元数据里的已索引子块快照，共用知识库、版本、时间与文档筛选；删除后不维护额外词法索引 |
+| BM25 分词 | 英文数字完整词及型号标识，中文单字与双字片段，全半角归一化；未提供通用多语言分词 |
+| 参数比较 | 请求和服务端可配置 RRF k；记录各路片段、原始分数及融合分数，生成六组对照报告 |
+| 重试复用 | 模型返回向量后先持久化检查点，再写向量并确认；写入失败或确认失败的重试复用向量 |
+| 回答状态 | 外部模型默认严格 JSON：可回答标记、逐条结论与原文证据；核对实际截断上下文并由服务端生成引用；离线及文本兼容模式待复核 |
+| 证据装配 | 转义文件及正文包装，父块去重与实际截断分别计数；Token 仍为字符粗估 |
+| 本地入口 | 上传入库、检索选择、回答、原 PDF 查看与反馈保存；接口和静态页面均有本地验证 |
+| 容量与执行权 | 单进程上传准入锁、操作系统单执行器锁；不等同于分布式租约或强制资源隔离 |
+
+BM25 扫描并分词当前子块快照，适合小资料库；没有大规模倒排索引。`min_score` 仍只过滤向量相似度，不作为 BM25/RRF 拒答阈值。`score_kind` 区分分数类型；同时命中两路时，顶层原始分数保留首次命中通道的值，各通道完整值在 `routes` 中观察。任何分数都不能直接解释为正确概率。
+
+检查点以模型提供方、模型名、维度、索引代次、子块身份及内容生成指纹。完成确认后清理检查点。外部响应返回但检查点尚未落盘时崩溃仍可能重复计费；没有实现跨请求全局模型缓存或供应商 exactly-once。
+
+## 可复现的验证结果
+
+```powershell
+& '.\.codex-tools\api-venv\Scripts\python.exe' -X utf8 -m scripts.minimum_landing
+& '.\.codex-tools\api-venv\Scripts\python.exe' -X utf8 -m scripts.minimum_landing --require-real-models
+& '.\.codex-tools\api-venv\Scripts\python.exe' -X utf8 -m unittest discover -s backend/tests -t . -q
+```
+
+第二条命令在仍使用 hash 或 extractive 时拒绝运行，避免把离线结果写成真实模型验收。演示脚本使用临时数据目录，不改已有知识库；报告写入 `test_output/minimum-landing/report.json`，包含输入 SHA-256、模型、参数、逐题命中与失败结果。
+
+2026-10-04 首轮本机回归为 111 项，110 通过，1 项真实 pgvector 集成测试因未配置而跳过。回答契约补强后的最新记录见下文。本次未修改 Rust 核心，未重新执行 Rust 与外部 pdf-evals 回归，未提交 Git。
+
+评测使用两份仓库真实 PDF，共 15 个问题：12 个有答案，3 个无答案。标签根据实际提取内容起草，尚待人工复核；6 个调参问题和 6 个检查问题共享文档，不能称为独立文档测试集。正确来源要求文档、页码和关键文本同时满足；关键词出现不是答案语义正确性。
+
+| 配置 | 有答案问题 Recall@5 | MRR |
+|---|---:|---:|
+| hash 向量 | 0.583333 | 0.472222 |
+| BM25 | 0.833333 | 0.694444 |
+| 混合 k=10 | 0.833333 | 0.694444 |
+| 混合 k=30 | 0.833333 | 0.694444 |
+| 混合 k=60 | 0.833333 | 0.694444 |
+| 混合 k=100 | 0.833333 | 0.694444 |
+
+在这个小样本及离线向量模型下，词法通道改善了来源命中，但混合模式没有超过 BM25；四个 k 也未体现差异。保留 60 是默认起点，**没有实测最优结论**。没有启用真实重排，不推导真实模型或生产收益。
+
+首轮三个无答案问题中两个错误作答：资料有 Freon 12 的物性却没有保修期限；价格资料有 NEXO 售价却没有更换电池的维修价格。抽取式模型仍返回相关片段。第三个孤立不存在的标识正确拒答。这证明“相关且有引用”不足以保证可回答，需要继续做真实模型与证据支持性验收。
+
+12 个有答案问题中，9 个抽取输出包含预设关键片段，3 个缺少所需片段。此检查只用于定位抽取/排序/截断问题，不记为 75% 答案准确率，也不能用来源 Recall 替代回答质量。
+
+## 回答契约补强
+
+外部模型默认使用 `PDF_INSPECTOR_RAG_ANSWER_FORMAT=grounded_json`。输出只允许可回答标记和结论列表，每条结论必须携带来源子块 ID 与原文摘录。后端拒绝重复 JSON 键、额外字段、标记与结论冲突、未知来源、空证据及不在实际上下文中的摘录。被截断的父块尾部不能作为证据；文件名与页码由服务端根据来源生成，返回引用仅包含实际使用的来源。
+
+通过结构与摘录校验的回答标为 `completed`，语义支持字段仍明确为“模型声明，未独立检查”。这不能证明引文足以推出结论，也不能保证模型的可回答判断正确。兼容 `text` 与离线抽取回答统一为 `needs_review`；页面显示“证据摘录，需要原页核对”，避免把相关资料直接称为回答完成。
+
+结构化流式响应先缓存原始 JSON，校验成功后才发出可展示答案。格式或证据失败返回错误，不自动调用模型修补，不保存成功回答。流提前断开、供应商错误或输出长度截断同样失败。正常和流式回答都保存最终状态、校验结果及结论证据；再次记录同一回答保留原有反馈。
+
+最终回归共 130 项，129 通过、1 项真实 pgvector 因未配置跳过。新增 19 项测试覆盖严格 Schema、证据伪造、上下文截断、流式失败、HTTP 正常与错误响应、持久化与配置。两份 PDF 的端到端评测重新执行；演示页通过 Node 模拟 DOM 的加载、上传、入库、提问、原页和反馈流程检查，尚未进行真实浏览器视觉验收。
+
+最新离线报告为 `test_output/minimum-landing/grounded-report.json`，保留首轮报告用于比较。两份 PDF、15 题的检索结果保持不变，回答状态为 14 个待核对、1 个拒答、0 个完成。无答案题仍有 2 个未正确拒答，因此没有宣称拒答质量已经解决，也没有把“待核对”算成正确拒答。
+
+```powershell
+& '.\.codex-tools\api-venv\Scripts\python.exe' -X utf8 -m scripts.minimum_landing --output test_output/minimum-landing/grounded-report.json
+```
+
+## 模型检查 评测续跑与原页核对
+
+本轮新增模型契约检查命令，先检查配置，再以两条非敏感短文本验证 Embedding 数量、维度与非零向量，并用固定来源检查结构化生成和流式输出。缺配置时不发出请求；配置齐全后该检查会实际调用模型，消耗少量 Token。它验证接口契约，不代表模型质量验收。本机检查结果为 `configuration_required`，目前没有模型地址或已安装的本地生成模型，没有编造真实模型结果。
+
+```powershell
+& '.\.codex-tools\api-venv\Scripts\python.exe' -X utf8 -m scripts.check_models --output test_output/minimum-landing/model-readiness.json
+& '.\.codex-tools\api-venv\Scripts\python.exe' -X utf8 -m scripts.minimum_landing --require-real-models --work-dir test_output/minimum-landing/real-run --output test_output/minimum-landing/real-report.json
+& '.\.codex-tools\api-venv\Scripts\python.exe' -X utf8 -m scripts.minimum_landing --require-real-models --work-dir test_output/minimum-landing/real-run --output test_output/minimum-landing/real-report.json --resume --retry-failed
+```
+
+`--work-dir` 必须使用独立评测目录，不能使用已有服务数据库目录。每份资料、每组检索对照和每个回答保存检查点；`--resume` 复用成功结果，失败项保留错误，只有同时传入 `--retry-failed` 才重新执行失败项。恢复中断状态时复用既有任务、入库批次及向量检查点。文件内容、数据集、模型地址与身份、预算或处理代码变化时拒绝旧检查点；密钥轮换不影响复用。已保存的回答不会再次调用生成模型，测试也验证成功续跑没有 Embedding 和生成调用。
+
+这不是外部调用 exactly-once：模型响应成功但检查点未保存时崩溃仍可能重复计费；失败的整组检索对照重新执行时，组内已做过的查询向量也可能重复计算。报告分别统计错误、待核对和拒答，无答案错误不会算成正确拒答；Token 汇总仅覆盖保留的成功生成响应，不包括 Embedding、失败调用或模型检查，不能当作总账单。
+
+页面直接展示每条结论的原文摘录与来源页范围，允许逐条标记“支持／不支持／尚未核对”，填写正确答案和说明。只有主动核对的引用才进入反馈的有效或无效列表，不把“有帮助”自动等同于全部引用正确。旧引用可按文档身份补查任务，新引用直接携带来源任务身份，解决原来只能查前 200 份文档的问题。
+
+实际浏览器验收发现内嵌 PDF 空白，现改用经过同等鉴权的单页 PNG 预览，并保留原 PDF 下载入口。输出最多 200 万像素、最长边 4096；该输出限制不等于对原始 PDF 解码实行硬内存隔离。后台依赖增加 PyMuPDF。浏览器已实际显示 Freon 第 2 页并保存核对反馈，测试记录明确注明为自动化验收，未计作真实用户反馈。
+
+本轮最终回归 **146 项，145 通过、1 项真实 pgvector 跳过**。新测试覆盖模型缺配置不调用、接口契约、零向量、秘密不写入报告、成功结果零调用续跑、仅重试失败题、模型／问题改变拒绝复用、失败入库恢复、实际 PNG 输出与像素上限、鉴权和损坏 PDF；另有 Node 页面行为检查和真实浏览器原页验收。未修改 Rust 或提交 Git。
+
+最新报告为 `test_output/minimum-landing/resumable-report-final.json`：两份 PDF、15 题执行完成，14 个待核对、1 个拒答、0 个调用错误；3 个无答案题中仍有 2 个没有正确拒答。执行完成表示评测程序跑完，不表示答案质量达标。
+
+## MVP 后的第一轮拓展：评测审核与预算明细
+
+新增 `examples/minimum_landing_eval_v2.json`，使用相同两份真实 PDF，保留原 15 个英文问题并增加 15 个中文问法。总计 24 个有答案问题、6 个无答案问题。标签仍为草拟待人工审核；翻译问法与原题共享证据，不是 30 个独立样本，也不是独立文档测试集。
+
+评测执行前校验题号唯一、文档引用、严格布尔标签、正整数页码和必需证据；不支持的字段与矛盾标签直接失败。数据集和报告保存独立内容指纹，并记录实际入库文档身份，便于后续验证引用范围。
+
+新命令 `scripts.score_landing` 读取已有报告，无需重新解析或调用模型。`prepare` 导出逐题 Markdown 审核表与 JSON 模板；模板默认全部未审核。核对原 PDF 后填写标签、答案与引用三个独立判断，并记录审核人和带时区的时间；错误分类要写原因。`score` 拒绝未知／重复题号、过期审核、失败回答被评为正确、拒答与引用结论冲突。审核人字段是记录，不表示服务端已经认证了审核人的身份。
+
+```powershell
+& '.\.codex-tools\api-venv\Scripts\python.exe' -X utf8 -m scripts.minimum_landing --dataset examples/minimum_landing_eval_v2.json --work-dir test_output/minimum-landing/bilingual-v2-run --output test_output/minimum-landing/bilingual-v2-report.json
+& '.\.codex-tools\api-venv\Scripts\python.exe' -X utf8 -m scripts.score_landing prepare --dataset examples/minimum_landing_eval_v2.json --report test_output/minimum-landing/bilingual-v2-report.json --output-dir test_output/minimum-landing/bilingual-v2-review
+& '.\.codex-tools\api-venv\Scripts\python.exe' -X utf8 -m scripts.score_landing score --dataset examples/minimum_landing_eval_v2.json --report test_output/minimum-landing/bilingual-v2-report.json --reviews test_output/minimum-landing/bilingual-v2-review/review-template.json --output-dir test_output/minimum-landing/bilingual-v2-score
+```
+
+保留未经修改的模板，复制另一个文件填写人工审核，再用 `--reviews` 指定它。输出默认拒绝覆盖；重新评分使用新目录或显式 `--overwrite`。评分不能覆盖输入文件。审核绑定整份报告，续跑重新生成报告后需重新导出审核包；不能把旧答案的审核套到新回答。旧版不含数据集指纹的历史报告维持原样，不能冒充新格式审核结果。
+
+机器诊断按调参／检查、语言和题型统计拒答、关键片段、最终引用文档与页码。必需页码须全部覆盖，但页码覆盖并不证明引用支持结论。错误与未执行题保留在机器统计分母；人工正确率仅包含已确认标签且明确判断的题，另外报告审核覆盖率。没有人工审核时正确率为未知，不按 100% 或 0% 解释。两个组共享文档族会明确提示；即使没有发现族重叠，也不认证测试集独立性。
+
+本轮实际离线结果：**30 题，27 个待核对、3 个拒答、0 个调用错误**。6 个无答案题有 2 个正确拒答、4 个仍作答；另有 1 个有答案中文问题被拒答。关键片段出现为 17/24，引用文档与必需页码覆盖为 23/24，这两个值均不是答案准确率。人工审核覆盖为 0/30。中英文分别统计见 `test_output/minimum-landing/bilingual-v2-score/score.json`；未把模拟审核测试计作人工标签或真实用户反馈。
+
+上下文现在逐候选记录 `selected`、`body_truncated`、`duplicate_parent`、`budget_omitted`、`empty_content`。`truncated` 只表示正文被截断或预算舍弃，父块去重和空正文有各自计数。来源估算包含装配分隔符；另外给出系统提示与用户消息正文估算、加输出预留的合计。当前仍是字符估算，不包含模型聊天封装，不保证真实模型窗口，`model_window_verified=false` 明示此范围。
+
+最新完整后端回归 **165 项，164 通过、1 项真实 pgvector 跳过**；新增 13 项审核与数据契约测试、6 项预算原因测试。原演示页 Node 行为检查再次通过，30 题 PDF 端到端执行与审核导出／评分 CLI 通过。未修改 Rust，未提交 Git。
+
+## 下一次验收
+
+1. 配置真实 Embedding 和生成模型，运行真实模式并记录模型版本、调用费用与延迟；报告不记录密钥。
+2. 人工核对现有 15 题，再补领域同义表达、相近型号、无答案、冲突、过期版本和提示注入样本。
+3. 使用真实模型验证结构化可回答判断及原文证据；重点检查两个负例与“引文存在但不支持结论”的情况，不按题目硬编码拒答。
+4. 固定候选与召回预算比较 RRF k、改写和重排，保留失败样本后再作参数选择。
+5. 请实际使用者核对原页并提交意见，完成一次人工确认后的反馈回归。当前没有真实用户反馈记录。
+
+无缝索引代次发布、精确模型 Token 预算、逐句事实支持校验、OCR 进程资源隔离及多人对象权限仍在待办中。最小本地工程闭环已实现，业务质量验收保持待完成。
+
+下一阶段按 [MVP 后续迭代清单](post-mvp-todolist.md) 推进；原 30 项审计清单保留详细背景与对应问答。
+
+## 本轮提交授权
+
+2026-10-05，负责人在外部回归例外问题之后明确要求自动创建并合并 PR，本轮三个已验证阶段按该指令提交、推送及合并。外部 pdf-evals 未运行，不宣称覆盖等价，也不永久修改 AGENTS.md。

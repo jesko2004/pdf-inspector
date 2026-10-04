@@ -2,16 +2,18 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from html import escape, unescape
 from time import perf_counter
 from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 from .config import Settings
+from .answer_validation import REFUSAL, validate_answer
+from .grounded_answer import SYSTEM_PROMPT, validate_grounded_answer
 from .knowledge_service import KnowledgeService
 from .llm import LlmProvider, create_llm_provider, estimate_tokens, truncate_to_tokens
 
-REFUSAL = "知识库中没有足够信息 / Not enough information in the knowledge base."
 LlmFactory = Callable[[str, str], LlmProvider]
 
 
@@ -26,6 +28,7 @@ class PreparedAnswer:
     context: dict[str, Any]
     max_output_tokens: int
     refused: bool
+    sources: list[dict[str, Any]] = field(default_factory=list)
 
 
 class RagService:
@@ -68,6 +71,8 @@ class RagService:
         rewrite_query: bool = False,
         max_query_variants: int = 3,
         rerank: bool = False,
+        retrieval_mode: str = "vector",
+        rrf_k: int | None = None,
         include_historical: bool = False,
         versions: list[str] | None = None,
         as_of: str | None = None,
@@ -82,6 +87,8 @@ class RagService:
             max_output_tokens or self.settings.rag_max_output_tokens,
             self.settings.rag_max_output_tokens,
         )
+        if (max_context_tokens is not None and max_context_tokens <= 0) or (max_output_tokens is not None and max_output_tokens <= 0):
+            raise ValueError("token budgets must be positive")
         effective_min_score = (
             self.settings.rag_min_evidence_score if min_score is None else min_score
         )
@@ -99,47 +106,79 @@ class RagService:
             rewrite_query=rewrite_query,
             max_query_variants=max_query_variants,
             rerank=rerank,
+            retrieval_mode=retrieval_mode,
+            rrf_k=rrf_k,
             include_historical=include_historical,
             versions=versions or [],
             as_of=as_of,
         )
         selected = []
+        sources = []
         blocks = []
         used_tokens = 0
-        truncated = False
+        body_truncated = 0
+        deduplicated = 0
+        budget_omitted = 0
+        empty_content = 0
+        seen_parents = set()
+        selection = []
+        budget_exhausted = False
         for item in search["items"]:
             parent_id = item.get("parent_id") or item["chunk_id"]
-            if any(
-                selected_item.get("parent_id") == parent_id
-                for selected_item in selected
-            ):
+            decision = {"chunk_id": item["chunk_id"], "parent_id": parent_id}
+            selection.append(decision)
+            if parent_id in seen_parents:
+                deduplicated += 1
+                decision["reason"] = "duplicate_parent"
+                continue
+            seen_parents.add(parent_id)
+            if budget_exhausted:
+                budget_omitted += 1
+                decision["reason"] = "budget_omitted"
                 continue
             header = (
-                f'<source chunk_id="{item["chunk_id"]}" '
-                f'file="{item["filename"]}" pages="{item.get("context_pages", item["pages"])}" '
-                f'section="{item["section_path"]}">\n'
+                f'<source chunk_id="{escape(item["chunk_id"], quote=True)}" '
+                f'file="{escape(item["filename"], quote=True)}" pages="{item.get("context_pages", item["pages"])}" '
+                f'section="{escape(str(item["section_path"]), quote=True)}">\n'
             )
             footer = "\n</source>"
             wrapper_tokens = estimate_tokens(header + footer)
-            remaining = context_budget - used_tokens - wrapper_tokens
+            remaining = context_budget - used_tokens - wrapper_tokens - (1 if blocks else 0)
             if remaining <= 0:
-                truncated = True
-                break
+                budget_exhausted = True
+                budget_omitted += 1
+                decision["reason"] = "budget_omitted"
+                continue
             context_content = item.get("context_content", item["content"])
+            context_content = escape(context_content, quote=False)
+            if not context_content.strip():
+                empty_content += 1
+                decision["reason"] = "empty_content"
+                continue
             content = truncate_to_tokens(context_content, remaining)
             if not content:
-                truncated = True
-                break
+                budget_exhausted = True
+                budget_omitted += 1
+                decision["reason"] = "budget_omitted"
+                continue
             if content != context_content:
-                truncated = True
+                body_truncated += 1
+                budget_exhausted = True
+                decision["reason"] = "body_truncated"
+            else:
+                decision["reason"] = "selected"
             block = header + content + footer
-            block_tokens = estimate_tokens(block)
             blocks.append(block)
-            used_tokens += block_tokens
-            selected.append(item)
+            used_tokens = estimate_tokens("\n\n".join(blocks))
+            selected.append(dict(item))
             selected[-1]["parent_id"] = parent_id
-            if truncated:
-                break
+            citation = {**item["citation"], "chunk_id": item["chunk_id"]}
+            selected[-1]["citation"] = citation
+            sources.append({
+                "chunk_id": item["chunk_id"],
+                "text": unescape(content),
+                "citation": citation,
+            })
 
         refused = not selected
         system = (
@@ -148,7 +187,10 @@ class RagService:
             f"If the sources do not answer the question, reply exactly: {REFUSAL} "
             "Use the same primary language as the question."
         )
+        if self._structured():
+            system = SYSTEM_PROMPT
         user = f"Question:\n{question}\n\nSources:\n" + "\n\n".join(blocks)
+        prompt_tokens = estimate_tokens(system) + estimate_tokens(user)
         citations = [item["citation"] for item in selected]
         return PreparedAnswer(
             answer_id=str(uuid4()),
@@ -166,16 +208,55 @@ class RagService:
                 "min_score": effective_min_score,
                 "query_variants": search.get("query_variants", [question]),
                 "route_count": search.get("route_count", 1),
+                "retrieval_mode": search.get("retrieval_mode", "vector"),
+                "rrf_k": search.get("rrf_k"),
                 "rerank": search.get("rerank", {"requested": False, "applied": False}),
             },
             context={
                 "estimated_tokens": used_tokens,
                 "max_tokens": context_budget,
-                "truncated": truncated or len(selected) < search["returned"],
+                "truncated": body_truncated > 0 or budget_omitted > 0,
+                "deduplicated": deduplicated,
+                "omitted": budget_omitted + empty_content,
+                "body_truncated": body_truncated,
+                "budget_omitted": budget_omitted,
+                "empty_content": empty_content,
+                "selection": selection,
+                "truncation_reasons": (["body_truncated"] if body_truncated else []) + (["budget_omitted"] if budget_omitted else []),
+                "counting_method": "character_estimate",
+                "prompt_estimated_tokens": prompt_tokens,
+                "estimated_total_with_output_reserve": prompt_tokens + output_budget,
+                "prompt_counting_scope": "message_content_only_no_chat_framing",
+                "model_window_verified": False,
             },
             max_output_tokens=output_budget,
             refused=refused,
+            sources=sources,
         )
+
+    def _structured(self) -> bool:
+        return (
+            self.settings.llm_provider != "extractive"
+            and self.settings.rag_answer_format == "grounded_json"
+        )
+
+    def _validate(self, prepared: PreparedAnswer, text: str) -> dict[str, Any]:
+        if self._structured() and not prepared.refused:
+            return validate_grounded_answer(text, prepared.sources)
+        validation = validate_answer(
+            text, prepared.citations,
+            extractive=self.settings.llm_provider == "extractive",
+        )
+        return {
+            "answer": text,
+            "validation": validation,
+            "claims": [],
+            "citations": [] if validation["refused"] else (
+                prepared.citations[:1]
+                if self.settings.llm_provider == "extractive"
+                else prepared.citations
+            ),
+        }
 
     def answer(self, prepared: PreparedAnswer) -> dict[str, Any]:
         started = perf_counter()
@@ -188,15 +269,20 @@ class RagService:
             )
             text = result.text
             usage = result.usage
+        checked = self._validate(prepared, text)
+        validation = checked["validation"]
         return {
             "answer_id": prepared.answer_id,
             "knowledge_base_id": prepared.knowledge_base_id,
             "question": prepared.question,
-            "answer": text,
-            "refused": prepared.refused,
+            "answer": checked["answer"],
+            "claims": checked["claims"],
+            "refused": validation["refused"],
+            "status": validation["status"],
+            "validation": validation,
             "llm_provider": self.settings.llm_provider,
             "llm_model": self.settings.llm_model,
-            "citations": prepared.citations,
+            "citations": checked["citations"],
             "retrieval": prepared.retrieval,
             "context": prepared.context,
             "usage": usage,
@@ -217,6 +303,7 @@ class RagService:
                 "citations": prepared.citations,
                 "retrieval": prepared.retrieval,
                 "context": prepared.context,
+                "buffered_until_validated": self._structured(),
             },
         }
         tokens = (
@@ -229,12 +316,23 @@ class RagService:
         answer_parts = []
         for token in tokens:
             answer_parts.append(token)
-            yield {"event": "token", "data": {"text": token}}
+            if not self._structured():
+                yield {"event": "token", "data": {"text": token}}
+        text = "".join(answer_parts)
+        checked = self._validate(prepared, text)
+        validation = checked["validation"]
+        if self._structured():
+            yield {"event": "token", "data": {"text": checked["answer"]}}
         yield {
             "event": "done",
             "data": {
                 "answer_id": prepared.answer_id,
-                "answer": "".join(answer_parts),
+                "answer": checked["answer"],
+                "claims": checked["claims"],
+                "refused": validation["refused"],
+                "status": validation["status"],
+                "validation": validation,
+                "citations": checked["citations"],
                 "generation_latency_ms": round((perf_counter() - started) * 1000, 3),
             },
         }

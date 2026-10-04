@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from html import unescape
 from dataclasses import dataclass
 from typing import Callable, Iterable, Protocol
 from urllib.error import HTTPError, URLError
@@ -55,7 +56,7 @@ class ExtractiveLlmProvider:
             return (
                 "知识库中没有足够信息 / Not enough information in the knowledge base."
             )
-        evidence = prompt[content_start + 1 : content_end].strip()
+        evidence = unescape(prompt[content_start + 1 : content_end].strip())
         return evidence[:2000]
 
     def generate(self, messages: list[dict[str, str]], *, max_tokens: int) -> LlmResult:
@@ -149,6 +150,9 @@ class OpenAICompatibleLlmProvider:
             raise self._request_error(exc) from exc
         try:
             payload = json.loads(raw)
+            reason = payload["choices"][0].get("finish_reason")
+            if reason is not None and reason != "stop":
+                raise LlmError(f"LLM generation did not complete normally: {reason}")
             text = payload["choices"][0]["message"]["content"].strip()
             usage = {key: int(value) for key, value in payload.get("usage", {}).items()}
         except (
@@ -157,6 +161,7 @@ class OpenAICompatibleLlmProvider:
             TypeError,
             ValueError,
             json.JSONDecodeError,
+            AttributeError,
         ) as exc:
             raise LlmError("LLM endpoint returned an invalid response") from exc
         if not text:
@@ -171,6 +176,7 @@ class OpenAICompatibleLlmProvider:
                 self._request(messages, max_tokens, stream=True),
                 self.timeout_seconds,
             )
+            stopped = False
             for raw_line in lines:
                 line = raw_line.decode("utf-8", errors="replace").strip()
                 if not line or line.startswith(":"):
@@ -181,15 +187,26 @@ class OpenAICompatibleLlmProvider:
                 if data == "[DONE]":
                     return
                 payload = json.loads(data)
+                if payload.get("error"):
+                    raise LlmError("LLM stream returned a provider error")
                 choices = payload.get("choices", [])
                 if not choices:
                     continue
+                reason = choices[0].get("finish_reason")
+                if reason is not None:
+                    if reason != "stop":
+                        raise LlmError(f"LLM stream did not complete normally: {reason}")
+                    stopped = True
                 content = choices[0].get("delta", {}).get("content")
                 if content:
-                    yield str(content)
+                    if not isinstance(content, str):
+                        raise LlmError("LLM stream returned non-text content")
+                    yield content
+            if not stopped:
+                raise LlmError("LLM stream ended before a completion marker")
         except (HTTPError, URLError, OSError) as exc:
             raise self._request_error(exc) from exc
-        except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        except (TypeError, ValueError, AttributeError, IndexError, json.JSONDecodeError) as exc:
             raise LlmError("LLM stream returned an invalid event") from exc
 
 

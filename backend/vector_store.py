@@ -504,18 +504,29 @@ class PgVectorStore:
             SELECT * FROM ranked
              WHERE score >= %s
           ORDER BY score DESC, document_id, chunk_id
-             LIMIT %s
         """
+        if not query.table_filters:
+            sql += " LIMIT %s"
+        search_parameters = (vector, *parameters, query.min_score)
+        if not query.table_filters:
+            search_parameters += (query.top_k,)
+        rows = []
         with self._connect() as connection:
-            rows = connection.execute(
-                sql,
-                (
-                    vector,
-                    *parameters,
-                    query.min_score,
-                    query.top_k * (10 if query.table_filters else 1),
-                ),
-            ).fetchall()
+            cursor = connection.execute(sql, search_parameters)
+            if not query.table_filters:
+                rows = cursor.fetchall()
+            else:
+                # No arbitrary pre-filter top-k cut-off: a valid row can rank
+                # beyond top_k * 10. Keep Python matching identical to SQLite.
+                while len(rows) < query.top_k:
+                    batch = cursor.fetchmany(256)
+                    if not batch:
+                        break
+                    for row in batch:
+                        if table_matches(dict(row[9]), query.table_filters):
+                            rows.append(row)
+                            if len(rows) == query.top_k:
+                                break
         hits = [
             VectorSearchHit(
                 chunk_id=row[0],

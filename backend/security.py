@@ -46,7 +46,7 @@ def has_permission(principal: Principal, required: str) -> bool:
 
 
 def required_permission(method: str, path: str) -> str | None:
-    if path in {"/health", "/docs", "/redoc", "/openapi.json"}:
+    if path in {"/health", "/docs", "/redoc", "/openapi.json", "/demo"}:
         return None
     if path in {"/metrics", "/v1/audit-events"} or method == "DELETE":
         return "admin"

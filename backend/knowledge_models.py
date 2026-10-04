@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+from .table_query import TableCondition, compile_filters
 
 
 def normalize_aware_datetime(value: datetime | None) -> datetime | None:
@@ -127,10 +130,12 @@ class KnowledgeSearchRequest(BaseModel):
     page_end: int | None = Field(default=None, ge=1)
     kinds: list[str] = Field(default_factory=list, max_length=20)
     section_path_prefix: list[str] = Field(default_factory=list, max_length=20)
-    table_filters: dict[str, str] = Field(default_factory=dict, max_length=20)
+    table_filters: dict[str, str | TableCondition] = Field(default_factory=dict, max_length=20)
     rewrite_query: bool = False
     max_query_variants: int = Field(default=3, ge=1, le=5)
     rerank: bool = False
+    retrieval_mode: Literal["vector", "bm25", "hybrid"] = "vector"
+    rrf_k: int | None = Field(default=None, ge=1, le=10000)
     include_historical: bool = False
     versions: list[str] = Field(default_factory=list, max_length=20)
     as_of: datetime | None = None
@@ -162,15 +167,8 @@ class KnowledgeSearchRequest(BaseModel):
 
     @field_validator("table_filters")
     @classmethod
-    def normalize_table_filters(cls, values: dict[str, str]) -> dict[str, str]:
-        normalized = {}
-        for key, value in values.items():
-            key = key.strip()
-            value = value.strip()
-            if not key or not value:
-                raise ValueError("table filter keys and values must not be blank")
-            normalized[key] = value
-        return normalized
+    def normalize_table_filters(cls, values: dict[str, str | TableCondition]) -> dict[str, TableCondition]:
+        return compile_filters(values)
 
     @model_validator(mode="after")
     def validate_page_range(self) -> KnowledgeSearchRequest:
@@ -188,6 +186,14 @@ class RetrievalExpectedSource(BaseModel):
 
     document_id: str = Field(min_length=1, max_length=100)
     pages: list[int] = Field(default_factory=list, max_length=100)
+    required_text: list[str] = Field(default_factory=list, max_length=20)
+
+    @field_validator("required_text")
+    @classmethod
+    def validate_required_text(cls, values: list[str]) -> list[str]:
+        if any(not value.strip() or len(value) > 2000 for value in values):
+            raise ValueError("required_text must contain nonblank strings of at most 2000 characters")
+        return values
 
     @field_validator("document_id")
     @classmethod
@@ -234,11 +240,13 @@ class KnowledgeRetrievalEvaluationRequest(BaseModel):
     page_end: int | None = Field(default=None, ge=1)
     kinds: list[str] = Field(default_factory=list, max_length=20)
     section_path_prefix: list[str] = Field(default_factory=list, max_length=20)
-    table_filters: dict[str, str] = Field(default_factory=dict, max_length=20)
+    table_filters: dict[str, str | TableCondition] = Field(default_factory=dict, max_length=20)
     rewrite_query: bool = False
     max_query_variants: int = Field(default=3, ge=1, le=5)
     compare_rewrite: bool = False
     rerank: bool = False
+    retrieval_mode: Literal["vector", "bm25", "hybrid"] = "vector"
+    rrf_k: int | None = Field(default=None, ge=1, le=10000)
     compare_rerank: bool = False
     include_historical: bool = False
     versions: list[str] = Field(default_factory=list, max_length=20)
@@ -284,10 +292,12 @@ class KnowledgeAskRequest(BaseModel):
     page_end: int | None = Field(default=None, ge=1)
     kinds: list[str] = Field(default_factory=list, max_length=20)
     section_path_prefix: list[str] = Field(default_factory=list, max_length=20)
-    table_filters: dict[str, str] = Field(default_factory=dict, max_length=20)
+    table_filters: dict[str, str | TableCondition] = Field(default_factory=dict, max_length=20)
     rewrite_query: bool = False
     max_query_variants: int = Field(default=3, ge=1, le=5)
     rerank: bool = False
+    retrieval_mode: Literal["vector", "bm25", "hybrid"] = "vector"
+    rrf_k: int | None = Field(default=None, ge=1, le=10000)
     include_historical: bool = False
     versions: list[str] = Field(default_factory=list, max_length=20)
     as_of: datetime | None = None

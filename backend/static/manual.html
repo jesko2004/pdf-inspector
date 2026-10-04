@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="zh-CN">
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>PDF 资料查询</title>
+<style>
+body{font-family:system-ui,"Microsoft YaHei",sans-serif;margin:32px auto;padding:0 22px;max-width:900px;color:#18243a;background:#f6f8fc}h1{font-size:28px}section{background:white;padding:22px;margin:18px 0;border:1px solid #dbe2ed;border-radius:12px}label{display:block;margin:12px 0 6px}input,select,textarea,button{font:inherit;padding:9px;border:1px solid #bdc8d9;border-radius:6px}textarea{width:95%;min-height:75px}button{background:#254ca0;color:white;cursor:pointer;margin:6px 8px 6px 0}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.6}small{color:#526078}.row{display:flex;gap:12px;flex-wrap:wrap}.status{color:#364e79}iframe{width:100%;height:650px;border:1px solid #bdc8d9}#error{color:#a32222}
+</style>
+<style>
+#answer{max-height:340px;overflow-y:auto}#evidence article{border:1px solid #dbe2ed;border-radius:8px;padding:14px;margin:12px 0}#evidence h3{font-size:16px;margin:0 0 10px}blockquote{margin:10px 0;padding:12px;border-left:3px solid #254ca0;background:#f6f8fc;white-space:pre-wrap;overflow-wrap:anywhere}#citations>div{padding:10px 0;border-bottom:1px solid #e8edf4}
+</style>
+<h1>PDF 资料查询</h1>
+<p>上传资料，查询参数，打开原页核对，再记录反馈。离线模式用于演示流程；回答仍需核对来源。</p>
+<section><h2>连接与知识库</h2>
+<label for="key">API 密钥（本机未启用鉴权时留空）</label><input id="key" type="password" autocomplete="off">
+<button id="connect">加载知识库</button>
+<label for="kb">知识库</label><select id="kb"></select>
+<label for="name">新知识库名称</label><input id="name" value="资料查询"><button id="create">创建</button>
+<small id="models"></small></section>
+<section><h2>上传与入库</h2><label for="file">PDF 文件</label><input id="file" type="file" accept="application/pdf">
+<div class="row"><div><label for="documentKey">文档标识（更新时沿用）</label><input id="documentKey" placeholder="manual-a"></div><div><label for="version">版本</label><input id="version" value="v1"></div></div>
+<button id="upload">上传并入库</button><p id="progress" class="status" aria-live="polite"></p></section>
+<section><h2>提问与核对</h2><label for="question">问题</label><textarea id="question" placeholder="这份资料中某项参数是多少？"></textarea>
+<div class="row"><div><label for="mode">检索方式</label><select id="mode"><option value="hybrid">向量与 BM25 混合</option value="bm25">BM25</option><option value="vector">向量</option></select></div><div><label for="rrf">RRF k</label><input id="rrf" type="number" min="1" max="10000" value="60"></div></div>
+<button id="ask">提问</button><p id="status" class="status" aria-live="polite"></p><pre id="answer"></pre><div id="evidence"></div><div id="citations"></div>
+<details><summary>检索与上下文信息</summary><pre id="trace"></pre></details>
+<label for="correction">核对后的正确答案（选填）</label><textarea id="correction"></textarea><label for="comment">反馈说明（选填）</label><textarea id="comment"></textarea><button id="helpful">有帮助</button><button id="unhelpful">需要改进</button><p id="feedback" aria-live="polite"></p>
+</section><p id="error" role="alert"></p><section id="viewer" hidden><h2>原始 PDF</h2><p id="sourceLabel"></p><p id="previewStatus" role="status"></p><a id="downloadSource" hidden>下载原始 PDF</a><img id="pdfPage" hidden alt="引用来源的原始 PDF 页面" style="width:100%;height:auto;margin-top:14px"></section>
+<script>
+const $ = id => document.getElementById(id);
+let lastAnswer = null, answerKb = null, sourceUrl = null, previewUrl = null;
+let sourceRequest = 0;
+const citationReviews = new Map();
+
+async function api(path, options = {}) {
+  const headers = new Headers(options.headers || {});
+  if ($('key').value) headers.set('Authorization', 'Bearer ' + $('key').value);
+  if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
+  const response = await fetch(path, {...options, headers});
+  if (!response.ok) throw Error(response.status + ' ' + await response.text());
+  return response;
+}
+async function json(path, options) { return (await api(path, options)).json(); }
+function kbPath(id = $('kb').value) {
+  if (!id) throw Error('请先创建或选择知识库');
+  return '/v1/knowledge-bases/' + encodeURIComponent(id);
+}
+async function action(button, work) {
+  $('error').textContent = '';
+  button.disabled = true;
+  try { await work(); }
+  catch (error) {
+    $('error').textContent = error.message;
+    if (button === $('ask')) $('status').textContent = '本次回答失败，请查看错误信息';
+  } finally { button.disabled = false; }
+}
+async function load(selected) {
+  const data = await json('/v1/knowledge-bases');
+  $('kb').replaceChildren();
+  for (const item of data.items) {
+    const option = document.createElement('option');
+    option.value = item.id;
+    option.textContent = item.name + ' · ' + item.embedding_provider + '/' + item.embedding_model;
+    $('kb').append(option);
+  }
+  if (selected) $('kb').value = selected;
+  $('models').textContent = '离线模式提供资料摘录。生成模型由服务端配置。';
+}
+async function wait(path, ready, progress) {
+  const deadline = Date.now() + 300000;
+  while (Date.now() < deadline) {
+    const result = await json(path);
+    progress(result);
+    if (ready.includes(result.status)) return result;
+    if (result.status === 'failed') throw Error(JSON.stringify(result.error || result));
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  throw Error('等待超过五分钟，任务仍可在 API 中查询；请勿重复上传。');
+}
+async function openSource(citation, page) {
+  const request = ++sourceRequest;
+  let taskId = citation.task_id;
+  if (!taskId) {
+    const source = await json(kbPath(answerKb) + '/documents/' + encodeURIComponent(citation.document_id));
+    taskId = source.task_id;
+  }
+  const response = await api('/v1/tasks/' + encodeURIComponent(taskId) + '/source');
+  const original = await response.blob();
+  if (request !== sourceRequest) return;
+  if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+  sourceUrl = URL.createObjectURL(original);
+  $('downloadSource').href = sourceUrl;
+  $('downloadSource').download = citation.filename;
+  $('downloadSource').hidden = false;
+  $('sourceLabel').textContent = citation.filename + ' · 第 ' + page + ' 页';
+  $('pdfPage').hidden = true;
+  $('previewStatus').textContent = '正在加载原页…';
+  $('viewer').hidden = false;
+  $('viewer').scrollIntoView({behavior: 'smooth'});
+  try {
+    const image = await api('/v1/tasks/' + encodeURIComponent(taskId) + '/source/pages/' + page + '.png');
+    const preview = await image.blob();
+    if (request !== sourceRequest) return;
+    if (previewUrl) URL.revokeObjectURL(previewUrl);
+    previewUrl = URL.createObjectURL(preview);
+    $('pdfPage').src = previewUrl;
+    $('pdfPage').alt = citation.filename + ' 第 ' + page + ' 页';
+    $('pdfPage').hidden = false;
+    $('previewStatus').textContent = '';
+  } catch (error) {
+    if (request === sourceRequest) $('previewStatus').textContent = '原页预览暂不可用，可下载原始 PDF 核对。';
+  }
+}
+function sourceButton(citation, page) {
+  const button = document.createElement('button');
+  button.textContent = citation.filename + ' · 第 ' + page + ' 页';
+  button.onclick = () => action(button, () => openSource(citation, page));
+  return button;
+}
+function renderEvidence(result) {
+  for (const claim of result.claims || []) {
+    const card = document.createElement('article');
+    const heading = document.createElement('h3');
+    heading.textContent = claim.text;
+    card.append(heading);
+    for (const evidence of claim.evidence) {
+      const source = result.citations.find(item => item.chunk_id === evidence.chunk_id);
+      if (source) {
+        const caption = document.createElement('small');
+        caption.textContent = source.filename + ' · 来源页范围 ' + source.pages.join('、');
+        card.append(caption);
+      }
+      const quote = document.createElement('blockquote');
+      quote.textContent = evidence.quote;
+      card.append(quote);
+    }
+    $('evidence').append(card);
+  }
+  for (const [index, citation] of result.citations.entries()) {
+    const row = document.createElement('div');
+    for (const page of citation.pages) row.append(sourceButton(citation, page));
+    const label = document.createElement('label');
+    label.textContent = '来源 ' + (index + 1) + ' · ' + citation.filename + '：原页是否支持回答？';
+    const select = document.createElement('select');
+    select.setAttribute('aria-label', label.textContent);
+    for (const [value, text] of [['unreviewed', '尚未核对'], ['valid', '支持'], ['invalid', '不支持']]) {
+      const option = document.createElement('option');
+      option.value = value; option.textContent = text; select.append(option);
+    }
+    label.append(select); row.append(label); $('citations').append(row);
+    citationReviews.set(citation.chunk_id, select);
+  }
+}
+$('connect').onclick = () => action($('connect'), () => load());
+$('create').onclick = () => action($('create'), async () => {
+  const kb = await json('/v1/knowledge-bases', {method: 'POST', body: JSON.stringify({name: $('name').value})});
+  await load(kb.id);
+});
+$('upload').onclick = () => action($('upload'), async () => {
+  const base = kbPath();
+  const file = $('file').files[0];
+  if (!file) throw Error('请选择 PDF');
+  if (!$('documentKey').value.trim()) throw Error('请填写文档标识');
+  const form = new FormData(); form.append('file', file); form.append('profile_id', 'manual_query');
+  const task = await json('/v1/tasks', {method: 'POST', body: form});
+  $('progress').textContent = '解析任务 ' + task.id;
+  await wait('/v1/tasks/' + task.id, ['ready', 'needs_review'], result => $('progress').textContent = '解析 ' + result.status + ' · ' + task.id);
+  const source = await json(base + '/documents', {method: 'POST', body: JSON.stringify({task_id: task.id, document_key: $('documentKey').value, version: $('version').value})});
+  await wait(base + '/documents/' + source.id, ['ready'], result => $('progress').textContent = '入库 ' + result.status + ' · ' + source.id);
+  $('progress').textContent = '入库完成，可提问。';
+});
+$('ask').onclick = () => action($('ask'), async () => {
+  lastAnswer = null; citationReviews.clear();
+  sourceRequest += 1;
+  $('feedback').textContent = ''; $('citations').replaceChildren(); $('evidence').replaceChildren();
+  $('answer').textContent = ''; $('trace').textContent = ''; $('comment').value = ''; $('correction').value = '';
+  $('viewer').hidden = true; $('status').textContent = '正在查询…';
+  answerKb = $('kb').value;
+  const result = await json(kbPath(answerKb) + '/ask', {method: 'POST', body: JSON.stringify({question: $('question').value, retrieval_mode: $('mode').value, rrf_k: Number($('rrf').value), top_k: 5})});
+  lastAnswer = result;
+  $('answer').textContent = result.answer;
+  $('status').textContent = result.refused ? '资料不足，已拒答' : result.status === 'needs_review' ? (result.validation?.answer_mode === 'evidence_preview' ? '证据摘录，需要原页核对' : '回答待复核') : '已核验原文摘录，请核对结论';
+  $('trace').textContent = JSON.stringify({retrieval: result.retrieval, context: result.context, validation: result.validation, llm_provider: result.llm_provider, llm_model: result.llm_model}, null, 2);
+  renderEvidence(result);
+});
+async function feedback(helpful) {
+  if (!lastAnswer) throw Error('请先完成提问');
+  const valid = [], invalid = [];
+  for (const [id, select] of citationReviews) {
+    if (select.value === 'valid') valid.push(id);
+    if (select.value === 'invalid') invalid.push(id);
+  }
+  await json(kbPath(answerKb) + '/feedback', {method: 'POST', body: JSON.stringify({answer_id: lastAnswer.answer_id, helpful, valid_citation_ids: valid, invalid_citation_ids: invalid, correction: $('correction').value || null, comment: $('comment').value || null})});
+  $('feedback').textContent = '反馈已保存。';
+}
+$('helpful').onclick = () => action($('helpful'), () => feedback(true));
+$('unhelpful').onclick = () => action($('unhelpful'), () => feedback(false));
+window.addEventListener('beforeunload', () => { if (sourceUrl) URL.revokeObjectURL(sourceUrl); if (previewUrl) URL.revokeObjectURL(previewUrl); });
+</script>
+</html>

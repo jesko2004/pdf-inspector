@@ -84,6 +84,31 @@ ADVANCED_RETRIEVAL_MIGRATION = Migration(
 )
 
 
+EMBEDDING_CHECKPOINT_MIGRATION = Migration(
+    3,
+    "embedding_checkpoints",
+    """
+    CREATE TABLE embedding_checkpoints (
+        batch_id TEXT PRIMARY KEY REFERENCES embedding_batches(id) ON DELETE CASCADE,
+        payload_hash TEXT NOT NULL,
+        vectors_json TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    );
+    """,
+)
+
+ANSWER_VALIDATION_MIGRATION = Migration(
+    4,
+    "persist_answer_validation",
+    """
+    ALTER TABLE rag_answers ADD COLUMN status TEXT NOT NULL DEFAULT 'needs_review';
+    ALTER TABLE rag_answers ADD COLUMN validation_json TEXT NOT NULL DEFAULT '{}';
+    ALTER TABLE rag_answers ADD COLUMN claims_json TEXT NOT NULL DEFAULT '[]';
+    UPDATE rag_answers SET status = 'refused' WHERE refused = 1;
+    """,
+)
+
+
 def _chunk_key(chunk: dict[str, Any]) -> str:
     section = json.dumps(
         chunk.get("section_path", []), ensure_ascii=False, separators=(",", ":")
@@ -222,6 +247,8 @@ class KnowledgeStore:
                 (
                     Migration(1, "baseline_knowledge_schema", "SELECT 1;"),
                     ADVANCED_RETRIEVAL_MIGRATION,
+                    EMBEDDING_CHECKPOINT_MIGRATION,
+                    ANSWER_VALIDATION_MIGRATION,
                 ),
             )
 
@@ -449,6 +476,37 @@ class KnowledgeStore:
         row["section_path"] = json.loads(row.pop("section_path_json"))
         row["metadata"] = json.loads(row.pop("metadata_json", "{}"))
         return row
+
+    def indexed_chunk_snapshot(self, knowledge_base_id: str, document_ids: list[str]) -> list[dict[str, Any]]:
+        """Read only indexed chunks of the already-authorized document set."""
+        if not document_ids:
+            return []
+        placeholders = ",".join("?" for _ in document_ids)
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT c.* FROM knowledge_chunks c JOIN knowledge_documents d ON d.id = c.document_id "
+                f"WHERE d.knowledge_base_id = ? AND c.document_id IN ({placeholders}) "
+                "AND c.status = 'indexed' ORDER BY c.document_id, c.id",
+                (knowledge_base_id, *document_ids),
+            ).fetchall()
+        return [self._public_chunk(dict(row)) for row in rows]
+
+    def get_embedding_checkpoint(self, batch_id: str, payload_hash: str) -> list[list[float]] | None:
+        with self._connect() as connection:
+            row = connection.execute(
+                "SELECT vectors_json FROM embedding_checkpoints WHERE batch_id = ? AND payload_hash = ?",
+                (batch_id, payload_hash),
+            ).fetchone()
+        return json.loads(row["vectors_json"]) if row else None
+
+    def save_embedding_checkpoint(self, batch_id: str, payload_hash: str, vectors: list[list[float]]) -> None:
+        with self._connect() as connection:
+            connection.execute(
+                "INSERT INTO embedding_checkpoints VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(batch_id) DO UPDATE SET payload_hash = excluded.payload_hash, "
+                "vectors_json = excluded.vectors_json, updated_at = excluded.updated_at",
+                (batch_id, payload_hash, json.dumps(vectors, allow_nan=False), utc_now()),
+            )
 
     def list_batches(self, document_id: str) -> list[dict[str, Any]]:
         self.get_document(document_id)
@@ -730,10 +788,19 @@ class KnowledgeStore:
         with self._connect() as connection:
             connection.execute(
                 """
-                INSERT OR REPLACE INTO rag_answers(
+                INSERT INTO rag_answers(
                     id, knowledge_base_id, question, answer, refused,
-                    citations_json, retrieval_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    citations_json, retrieval_json, created_at,
+                    status, validation_json, claims_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(id) DO UPDATE SET
+                    answer = excluded.answer, refused = excluded.refused,
+                    citations_json = excluded.citations_json,
+                    retrieval_json = excluded.retrieval_json,
+                    status = excluded.status, validation_json = excluded.validation_json,
+                    claims_json = excluded.claims_json
+                WHERE rag_answers.knowledge_base_id = excluded.knowledge_base_id
+                  AND rag_answers.question = excluded.question
                 """,
                 (
                     answer["answer_id"],
@@ -744,6 +811,9 @@ class KnowledgeStore:
                     json.dumps(answer["citations"], ensure_ascii=False),
                     json.dumps(answer["retrieval"], ensure_ascii=False),
                     utc_now(),
+                    answer.get("status", "refused" if answer["refused"] else "needs_review"),
+                    json.dumps(answer.get("validation", {}), ensure_ascii=False),
+                    json.dumps(answer.get("claims", []), ensure_ascii=False),
                 ),
             )
 
@@ -1029,6 +1099,8 @@ class KnowledgeStore:
                 (now, batch_id),
             )
             self._refresh_document(connection, batch["document_id"], now)
+
+            connection.execute("DELETE FROM embedding_checkpoints WHERE batch_id = ?", (batch_id,))
 
     def fail_batch(self, batch_id: str, error_code: str, error_message: str) -> None:
         with self._connect() as connection:

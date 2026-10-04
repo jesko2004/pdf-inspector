@@ -11,6 +11,7 @@ from typing import BinaryIO, Callable
 from uuid import uuid4
 
 from .config import Settings
+from .execution_lock import SingleExecutorLock
 from .processor import process_document
 from .profile_store import ProfileStore
 from .profiles import Profile
@@ -51,11 +52,21 @@ class TaskService:
         )
         self._future_lock = Lock()
         self._futures = set()
+        self._admission_lock = Lock()
+        self._execution_lock = (
+            SingleExecutorLock(settings.data_dir / "executor.lock")
+            if start_workers else None
+        )
         if start_workers:
             for task_id in self.tasks.recover_incomplete():
                 self._submit(task_id)
 
     def create_task(self, filename: str, stream: BinaryIO, profile_id: str) -> dict:
+        # Single-process admission: check and creation must share one critical section.
+        with self._admission_lock:
+            return self._create_task(filename, stream, profile_id)
+
+    def _create_task(self, filename: str, stream: BinaryIO, profile_id: str) -> dict:
         if self.tasks.count_active() >= self.settings.max_active_tasks:
             raise CapacityExceededError("active task limit reached; retry later")
         profile = self.profiles.get(profile_id)
@@ -113,6 +124,8 @@ class TaskService:
 
     def close(self) -> None:
         self.executor.shutdown(wait=True, cancel_futures=False)
+        if self._execution_lock is not None:
+            self._execution_lock.close()
 
     def _save_validated_upload(self, stream: BinaryIO, destination: Path) -> None:
         size = 0

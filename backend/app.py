@@ -8,6 +8,7 @@ import re
 from contextlib import asynccontextmanager
 from datetime import datetime
 from functools import partial
+from pathlib import Path
 from time import perf_counter
 from typing import Annotated
 from uuid import uuid4
@@ -26,6 +27,7 @@ except ImportError as exc:
     ) from exc
 
 from .config import Settings
+from .source_preview import PreviewPageNotFoundError, PreviewUnavailableError, render_source_page
 from .embeddings import EmbeddingError
 from .knowledge_models import (
     KnowledgeAskRequest,
@@ -48,6 +50,7 @@ from .knowledge_store import (
     KnowledgeStore,
 )
 from .llm import LlmError
+from .table_query import TableQueryError
 from .observability import (
     AuditStore,
     MetricsRegistry,
@@ -266,6 +269,10 @@ def create_app(
     def health() -> dict:
         return {"status": "ok"}
 
+    @app.get("/demo", response_class=FileResponse)
+    def manual_demo():
+        return FileResponse(Path(__file__).parent / "static" / "manual.html")
+
     @app.get("/metrics", response_class=Response)
     def prometheus_metrics() -> Response:
         for status in ("queued", "processing", "ready", "needs_review", "failed"):
@@ -345,6 +352,8 @@ def create_app(
                 rewrite_query=payload.rewrite_query,
                 max_query_variants=payload.max_query_variants,
                 rerank=payload.rerank,
+                retrieval_mode=payload.retrieval_mode,
+                rrf_k=payload.rrf_k,
                 include_historical=payload.include_historical,
                 versions=payload.versions,
                 as_of=payload.as_of.isoformat() if payload.as_of else None,
@@ -353,6 +362,8 @@ def create_app(
             raise HTTPException(
                 status_code=404, detail="knowledge_base_not_found"
             ) from exc
+        except TableQueryError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except (EmbeddingError, ValueError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -376,6 +387,8 @@ def create_app(
                 max_query_variants=payload.max_query_variants,
                 compare_rewrite=payload.compare_rewrite,
                 rerank=payload.rerank,
+                retrieval_mode=payload.retrieval_mode,
+                rrf_k=payload.rrf_k,
                 compare_rerank=payload.compare_rerank,
                 include_historical=payload.include_historical,
                 versions=payload.versions,
@@ -385,6 +398,8 @@ def create_app(
             raise HTTPException(
                 status_code=404, detail="knowledge_base_not_found"
             ) from exc
+        except TableQueryError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except (EmbeddingError, ValueError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -427,6 +442,8 @@ def create_app(
                 rewrite_query=payload.rewrite_query,
                 max_query_variants=payload.max_query_variants,
                 rerank=payload.rerank,
+                retrieval_mode=payload.retrieval_mode,
+                rrf_k=payload.rrf_k,
                 include_historical=payload.include_historical,
                 versions=payload.versions,
                 as_of=payload.as_of.isoformat() if payload.as_of else None,
@@ -458,7 +475,7 @@ def create_app(
                                 "llm_generation",
                                 event["data"]["generation_latency_ms"] / 1000,
                             )
-                            if prepared.refused:
+                            if event["data"]["refused"]:
                                 metrics.increment("pdf_inspector_rag_refusals_total")
                             knowledge.store.record_answer(
                                 {
@@ -466,9 +483,12 @@ def create_app(
                                     "knowledge_base_id": prepared.knowledge_base_id,
                                     "question": prepared.question,
                                     "answer": event["data"]["answer"],
-                                    "refused": prepared.refused,
-                                    "citations": prepared.citations,
+                                    "refused": event["data"]["refused"],
+                                    "citations": event["data"]["citations"],
                                     "retrieval": prepared.retrieval,
+                                    "status": event["data"]["status"],
+                                    "validation": event["data"]["validation"],
+                                    "claims": event["data"].get("claims", []),
                                 }
                             )
                         yield (
@@ -490,6 +510,8 @@ def create_app(
             raise HTTPException(
                 status_code=404, detail="knowledge_base_not_found"
             ) from exc
+        except TableQueryError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except (EmbeddingError, LlmError, ValueError) as exc:
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
@@ -807,6 +829,37 @@ def create_app(
             return service.get_task(task_id)
         except TaskNotFoundError as exc:
             raise HTTPException(status_code=404, detail="task_not_found") from exc
+
+    @app.get("/v1/tasks/{task_id}/source")
+    def get_source(task_id: str):
+        try:
+            task = service.get_task(task_id)
+        except TaskNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="task_not_found") from exc
+        # Resolve from an existing managed identity, never a client-supplied path.
+        path = settings.upload_dir / f"{task['id']}.pdf"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="source_not_found")
+        return FileResponse(path, media_type="application/pdf", filename=task["filename"])
+
+    @app.get("/v1/tasks/{task_id}/source/pages/{page}.png")
+    def get_source_page(task_id: str, page: int):
+        try:
+            task = service.get_task(task_id)
+        except TaskNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="task_not_found") from exc
+        path = settings.upload_dir / f"{task['id']}.pdf"
+        if not path.is_file():
+            raise HTTPException(status_code=404, detail="source_not_found")
+        try:
+            image = render_source_page(path, page)
+        except PreviewPageNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="source_page_not_found") from exc
+        except PreviewUnavailableError as exc:
+            raise HTTPException(status_code=503, detail="source_preview_dependency_missing") from exc
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail="source_page_render_failed") from exc
+        return Response(image, media_type="image/png", headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/tasks/{task_id}/result")
     def get_result(task_id: str, download: bool = False):

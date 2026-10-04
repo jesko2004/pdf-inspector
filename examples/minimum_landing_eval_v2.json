@@ -1,0 +1,554 @@
+{
+  "version": "2026-10-04-bilingual-v2",
+  "scenario": "技术资料参数查询与原页核对",
+  "annotation_status": "assistant_drafted_from_extracted_sources_pending_human_review",
+  "scope": "Two actual PDF fixtures, 15 English and 15 Chinese questions. Paired translations share evidence and document families; exploratory diagnostics only, labels pending human review, not an independent holdout or real-user quality claim.",
+  "documents": [
+    {
+      "key": "freon",
+      "path": "tests/fixtures/thermo-freon12.pdf",
+      "family": "freon-12-technical-data"
+    },
+    {
+      "key": "nexo",
+      "path": "tests/fixtures/nexo-price-en.pdf",
+      "family": "nexo-2025-price-list"
+    }
+  ],
+  "cases": [
+    {
+      "id": "freon-critical-temperature",
+      "split": "tuning",
+      "query": "What is the critical temperature?",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Critical Temperature",
+        "111.97"
+      ],
+      "expected_answer_fragments": [
+        "111.97"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "en"
+    },
+    {
+      "id": "freon-critical-pressure",
+      "split": "tuning",
+      "query": "Critical Pressure in kPa",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Critical Pressure",
+        "4136"
+      ],
+      "expected_answer_fragments": [
+        "4136",
+        "kPa"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "en"
+    },
+    {
+      "id": "freon-mass",
+      "split": "tuning",
+      "query": "Molecular mass",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Molecular mass",
+        "120.91"
+      ],
+      "expected_answer_fragments": [
+        "120.91"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "en"
+    },
+    {
+      "id": "freon-pressure-unit",
+      "split": "tuning",
+      "query": "Pressure kPa Absolute",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Pressure",
+        "kPa",
+        "Absolute"
+      ],
+      "expected_answer_fragments": [
+        "kPa",
+        "Absolute"
+      ],
+      "answerable": true,
+      "category": "unit",
+      "language": "en"
+    },
+    {
+      "id": "nexo-unit",
+      "split": "tuning",
+      "query": "What unit does the supplied price list use?",
+      "document": "nexo",
+      "pages": [
+        1
+      ],
+      "required_text": [
+        "Unit",
+        "KRW"
+      ],
+      "expected_answer_fragments": [
+        "KRW"
+      ],
+      "answerable": true,
+      "category": "currency",
+      "language": "en"
+    },
+    {
+      "id": "nexo-release",
+      "split": "tuning",
+      "query": "NEXO Release Date June",
+      "document": "nexo",
+      "pages": [
+        1
+      ],
+      "required_text": [
+        "Release Date",
+        "June 10, 2025"
+      ],
+      "expected_answer_fragments": [
+        "June 10, 2025"
+      ],
+      "answerable": true,
+      "category": "date",
+      "language": "en"
+    },
+    {
+      "id": "freon-boiling-point",
+      "split": "check",
+      "query": "Boiling Point At one atmosphere",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Boiling Point",
+        "-29.75"
+      ],
+      "expected_answer_fragments": [
+        "-29.75"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "en"
+    },
+    {
+      "id": "freon-critical-density",
+      "split": "check",
+      "query": "Critical Density kg/m",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Critical Density",
+        "565.0"
+      ],
+      "expected_answer_fragments": [
+        "565.0"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "en"
+    },
+    {
+      "id": "freon-critical-volume",
+      "split": "check",
+      "query": "Critical Volume cubic meters per kilogram",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Critical Volume",
+        "0.0018"
+      ],
+      "expected_answer_fragments": [
+        "0.0018"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "en"
+    },
+    {
+      "id": "freon-enthalpy",
+      "split": "check",
+      "query": "H Enthalpy unit",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Enthalpy",
+        "kJ/kg"
+      ],
+      "expected_answer_fragments": [
+        "kJ/kg"
+      ],
+      "answerable": true,
+      "category": "unit",
+      "language": "en"
+    },
+    {
+      "id": "nexo-exclusive-price",
+      "split": "check",
+      "query": "Exclusive selling price after tax benefit",
+      "document": "nexo",
+      "pages": [
+        1
+      ],
+      "required_text": [
+        "Exclusive",
+        "76,435,000"
+      ],
+      "expected_answer_fragments": [
+        "76,435,000"
+      ],
+      "answerable": true,
+      "category": "table_price",
+      "language": "en"
+    },
+    {
+      "id": "nexo-prestige-price",
+      "split": "check",
+      "query": "Prestige selling price after tax benefit",
+      "document": "nexo",
+      "pages": [
+        1
+      ],
+      "required_text": [
+        "Prestige",
+        "83,445,000"
+      ],
+      "expected_answer_fragments": [
+        "83,445,000"
+      ],
+      "answerable": true,
+      "category": "table_price",
+      "language": "en"
+    },
+    {
+      "id": "no-warranty",
+      "split": "check",
+      "query": "What is the Freon 12 warranty period?",
+      "document": "freon",
+      "pages": [],
+      "required_text": [],
+      "expected_answer_fragments": [],
+      "answerable": false,
+      "category": "unanswerable",
+      "language": "en"
+    },
+    {
+      "id": "no-battery-price",
+      "split": "check",
+      "query": "What is the NEXO replacement battery service price?",
+      "document": "nexo",
+      "pages": [],
+      "required_text": [],
+      "expected_answer_fragments": [],
+      "answerable": false,
+      "category": "unanswerable",
+      "language": "en"
+    },
+    {
+      "id": "no-identifier",
+      "split": "check",
+      "query": "ZZZ9999XY isolated identifier",
+      "document": "freon",
+      "pages": [],
+      "required_text": [],
+      "expected_answer_fragments": [],
+      "answerable": false,
+      "category": "unanswerable",
+      "language": "en"
+    },
+    {
+      "id": "freon-critical-temperature-zh",
+      "split": "tuning",
+      "query": "Freon 12 的临界温度是多少？",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Critical Temperature",
+        "111.97"
+      ],
+      "expected_answer_fragments": [
+        "111.97"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "zh"
+    },
+    {
+      "id": "freon-critical-pressure-zh",
+      "split": "tuning",
+      "query": "Freon 12 的临界压力是多少 kPa？",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Critical Pressure",
+        "4136"
+      ],
+      "expected_answer_fragments": [
+        "4136",
+        "kPa"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "zh"
+    },
+    {
+      "id": "freon-mass-zh",
+      "split": "tuning",
+      "query": "Freon 12 的分子质量是多少？",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Molecular mass",
+        "120.91"
+      ],
+      "expected_answer_fragments": [
+        "120.91"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "zh"
+    },
+    {
+      "id": "freon-pressure-unit-zh",
+      "split": "tuning",
+      "query": "物性表中的压力采用什么单位，是绝对压力吗？",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Pressure",
+        "kPa",
+        "Absolute"
+      ],
+      "expected_answer_fragments": [
+        "kPa",
+        "Absolute"
+      ],
+      "answerable": true,
+      "category": "unit",
+      "language": "zh"
+    },
+    {
+      "id": "nexo-unit-zh",
+      "split": "tuning",
+      "query": "这份 NEXO 价格表用的是什么币种？",
+      "document": "nexo",
+      "pages": [
+        1
+      ],
+      "required_text": [
+        "Unit",
+        "KRW"
+      ],
+      "expected_answer_fragments": [
+        "KRW"
+      ],
+      "answerable": true,
+      "category": "currency",
+      "language": "zh"
+    },
+    {
+      "id": "nexo-release-zh",
+      "split": "tuning",
+      "query": "NEXO 价格资料注明的发布日期是哪一天？",
+      "document": "nexo",
+      "pages": [
+        1
+      ],
+      "required_text": [
+        "Release Date",
+        "June 10, 2025"
+      ],
+      "expected_answer_fragments": [
+        "June 10, 2025"
+      ],
+      "answerable": true,
+      "category": "date",
+      "language": "zh"
+    },
+    {
+      "id": "freon-boiling-point-zh",
+      "split": "check",
+      "query": "Freon 12 在一个大气压下的沸点是多少？",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Boiling Point",
+        "-29.75"
+      ],
+      "expected_answer_fragments": [
+        "-29.75"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "zh"
+    },
+    {
+      "id": "freon-critical-density-zh",
+      "split": "check",
+      "query": "Freon 12 的临界密度是多少？",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Critical Density",
+        "565.0"
+      ],
+      "expected_answer_fragments": [
+        "565.0"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "zh"
+    },
+    {
+      "id": "freon-critical-volume-zh",
+      "split": "check",
+      "query": "Freon 12 的临界比容是多少？",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Critical Volume",
+        "0.0018"
+      ],
+      "expected_answer_fragments": [
+        "0.0018"
+      ],
+      "answerable": true,
+      "category": "parameter",
+      "language": "zh"
+    },
+    {
+      "id": "freon-enthalpy-zh",
+      "split": "check",
+      "query": "Freon 12 表中符号 H 代表什么，单位是什么？",
+      "document": "freon",
+      "pages": [
+        2
+      ],
+      "required_text": [
+        "Enthalpy",
+        "kJ/kg"
+      ],
+      "expected_answer_fragments": [
+        "kJ/kg"
+      ],
+      "answerable": true,
+      "category": "unit",
+      "language": "zh"
+    },
+    {
+      "id": "nexo-exclusive-price-zh",
+      "split": "check",
+      "query": "NEXO Exclusive 版本税收优惠后的售价是多少？",
+      "document": "nexo",
+      "pages": [
+        1
+      ],
+      "required_text": [
+        "Exclusive",
+        "76,435,000"
+      ],
+      "expected_answer_fragments": [
+        "76,435,000"
+      ],
+      "answerable": true,
+      "category": "table_price",
+      "language": "zh"
+    },
+    {
+      "id": "nexo-prestige-price-zh",
+      "split": "check",
+      "query": "NEXO Prestige 版本税收优惠后的售价是多少？",
+      "document": "nexo",
+      "pages": [
+        1
+      ],
+      "required_text": [
+        "Prestige",
+        "83,445,000"
+      ],
+      "expected_answer_fragments": [
+        "83,445,000"
+      ],
+      "answerable": true,
+      "category": "table_price",
+      "language": "zh"
+    },
+    {
+      "id": "no-warranty-zh",
+      "split": "check",
+      "query": "Freon 12 的保修期限是多久？",
+      "document": "freon",
+      "pages": [],
+      "required_text": [],
+      "expected_answer_fragments": [],
+      "answerable": false,
+      "category": "unanswerable",
+      "language": "zh"
+    },
+    {
+      "id": "no-battery-price-zh",
+      "split": "check",
+      "query": "NEXO 更换电池的维修价格是多少？",
+      "document": "nexo",
+      "pages": [],
+      "required_text": [],
+      "expected_answer_fragments": [],
+      "answerable": false,
+      "category": "unanswerable",
+      "language": "zh"
+    },
+    {
+      "id": "no-identifier-zh",
+      "split": "check",
+      "query": "资料中有没有 ZZZ9999XY 这个型号？",
+      "document": "freon",
+      "pages": [],
+      "required_text": [],
+      "expected_answer_fragments": [],
+      "answerable": false,
+      "category": "unanswerable",
+      "language": "zh"
+    }
+  ]
+}
