@@ -9,6 +9,7 @@ import math
 import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
+from dataclasses import replace
 from pathlib import Path
 from threading import Lock
 from time import perf_counter
@@ -346,6 +347,7 @@ class KnowledgeService:
         kinds: list[str],
         section_path_prefix: list[str],
         table_filters: dict[str, str] | None = None,
+        chunk_ids: tuple[str, ...] | None = None,
     ) -> list[VectorSearchHit]:
         return self.vector_store.search(
             VectorSearchQuery(
@@ -361,6 +363,7 @@ class KnowledgeService:
                 kinds=tuple(kinds),
                 section_path_prefix=tuple(section_path_prefix),
                 table_filters=tuple(sorted((table_filters or {}).items())),
+                chunk_ids=chunk_ids,
             )
         )
 
@@ -369,13 +372,21 @@ class KnowledgeService:
         hits: list[VectorSearchHit],
         fusion: dict[str, tuple[float, list[str]]] | None = None,
         table_filters=None,
+        documents_snapshot=None,
+        chunks_snapshot=None,
     ) -> list[dict[str, Any]]:
-        documents = {
+        documents = documents_snapshot if documents_snapshot is not None else {
             document_id: self.store.get_document(document_id)
             for document_id in {hit.document_id for hit in hits}
         }
         items = []
         for rank, hit in enumerate(hits, start=1):
+            if chunks_snapshot is not None:
+                chunk = chunks_snapshot[hit.chunk_id]
+                hit = replace(hit, text=chunk["text"], metadata={
+                    **chunk.get("metadata", {}), "pages": chunk["pages"],
+                    "score_kind": hit.metadata.get("score_kind", "cosine"),
+                })
             document = documents[hit.document_id]
             pages = hit.metadata.get("pages")
             if not isinstance(pages, list) or not pages:
@@ -553,7 +564,6 @@ class KnowledgeService:
             raise ValueError("rrf_k must be between 1 and 10000")
         table_filters = compile_filters(table_filters)
         started = perf_counter()
-        knowledge_base = self.store.get_knowledge_base(knowledge_base_id)
         variants = (
             self.query_rewriter.rewrite(query, max_query_variants)
             if rewrite_query
@@ -562,13 +572,16 @@ class KnowledgeService:
         candidate_limit = (
             max(top_k, self.settings.rerank_candidates) if rerank else top_k
         )
-        eligible_document_ids = self.store.eligible_document_ids(
+        knowledge_base, documents_snapshot, snapshot = self.store.retrieval_snapshot(
             knowledge_base_id,
             document_ids=document_ids,
             versions=versions or [],
             as_of=as_of,
             include_historical=include_historical,
         )
+        eligible_document_ids = list(documents_snapshot)
+        chunks_snapshot = {chunk["id"]: chunk for chunk in snapshot}
+        chunk_ids = tuple(chunks_snapshot)
         if not eligible_document_ids:
             return {
                 "knowledge_base_id": knowledge_base_id,
@@ -589,9 +602,7 @@ class KnowledgeService:
                 ],
                 "items": [],
             }
-        snapshot = None
         if table_filters:
-            snapshot = self.store.indexed_chunk_snapshot(knowledge_base_id, eligible_document_ids)
             # Resolve column ambiguity before spending query embedding tokens.
             for chunk in snapshot:
                 if (page_start is not None and chunk["page_end"] < page_start) or (page_end is not None and chunk["page_start"] > page_end):
@@ -634,6 +645,7 @@ class KnowledgeService:
                     kinds=kinds,
                     section_path_prefix=section_path_prefix,
                     table_filters=table_filters or {},
+                    chunk_ids=chunk_ids,
                 ),
             )
 
@@ -647,8 +659,6 @@ class KnowledgeService:
             ) as route_executor:
                 routes = list(route_executor.map(retrieve, route_inputs))
         if retrieval_mode in {"bm25", "hybrid"}:
-            if snapshot is None:
-                snapshot = self.store.indexed_chunk_snapshot(knowledge_base_id, eligible_document_ids)
             for variant in variants:
                 routes.append((f"bm25:{variant}", bm25_search(
                     variant, snapshot, knowledge_base_id=knowledge_base_id,
@@ -660,12 +670,12 @@ class KnowledgeService:
             self.metrics.observe("retrieval", perf_counter() - retrieval_started)
         if len(routes) == 1:
             hits = routes[0][1][:candidate_limit]
-            items = self._format_hits(hits, table_filters=table_filters)
+            items = self._format_hits(hits, table_filters=table_filters, documents_snapshot=documents_snapshot, chunks_snapshot=chunks_snapshot)
         else:
             fused = reciprocal_rank_fusion(routes, limit=candidate_limit, rank_constant=rank_constant)
             hits = [hit for hit, _score, _queries in fused]
             fusion = {hit.chunk_id: (score, queries) for hit, score, queries in fused}
-            items = self._format_hits(hits, fusion, table_filters=table_filters)
+            items = self._format_hits(hits, fusion, table_filters=table_filters, documents_snapshot=documents_snapshot, chunks_snapshot=chunks_snapshot)
         items, rerank_metadata = self._rerank_items(
             query,
             items,
@@ -796,14 +806,15 @@ class KnowledgeService:
                 }
             return advanced
         started = perf_counter()
-        knowledge_base = self.store.get_knowledge_base(knowledge_base_id)
-        document_ids = self.store.eligible_document_ids(
+        knowledge_base, documents_snapshot, snapshot = self.store.retrieval_snapshot(
             knowledge_base_id,
             document_ids=document_ids,
             versions=versions or [],
             as_of=as_of,
             include_historical=include_historical,
         )
+        document_ids = list(documents_snapshot)
+        chunks_snapshot = {chunk["id"]: chunk for chunk in snapshot}
         provider = self.embedding_factory(
             knowledge_base["embedding_provider"],
             knowledge_base["embedding_model"],
@@ -832,8 +843,9 @@ class KnowledgeService:
                 kinds=kinds,
                 section_path_prefix=section_path_prefix,
                 table_filters=table_filters,
+                chunk_ids=tuple(chunks_snapshot),
             )
-            items = self._format_hits(hits)
+            items = self._format_hits(hits, documents_snapshot=documents_snapshot, chunks_snapshot=chunks_snapshot)
             expected_sources = case["expected_sources"]
             matched_sources = sum(
                 any(self._hit_matches_expected(item, expected) for item in items)

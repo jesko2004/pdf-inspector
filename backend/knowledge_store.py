@@ -11,6 +11,7 @@ from typing import Any, Iterator
 from uuid import uuid4
 
 from .migrations import Migration, apply_migrations
+from .index_publication import INDEX_PUBLICATION_MIGRATION, initialize_publications, publish_ready, retrieval_snapshot
 from .task_store import utc_now
 
 DOCUMENT_STATUSES = {"queued", "indexing", "ready", "partial", "failed"}
@@ -249,8 +250,11 @@ class KnowledgeStore:
                     ADVANCED_RETRIEVAL_MIGRATION,
                     EMBEDDING_CHECKPOINT_MIGRATION,
                     ANSWER_VALIDATION_MIGRATION,
+                    INDEX_PUBLICATION_MIGRATION,
                 ),
             )
+
+            initialize_publications(self, connection)
 
     def batch_status_counts(self) -> dict[str, int]:
         with self._connect() as connection:
@@ -396,41 +400,13 @@ class KnowledgeStore:
         as_of: str | None,
         include_historical: bool,
     ) -> list[str]:
-        self.get_knowledge_base(knowledge_base_id)
-        where = ["knowledge_base_id = ?"]
-        parameters: list[Any] = [knowledge_base_id]
-        if document_ids:
-            placeholders = ",".join("?" for _ in document_ids)
-            where.append(f"id IN ({placeholders})")
-            parameters.extend(document_ids)
-        if versions:
-            placeholders = ",".join("?" for _ in versions)
-            where.append(f"version IN ({placeholders})")
-            parameters.extend(versions)
-        if as_of is not None:
-            where.extend(
-                [
-                    "(effective_from IS NULL OR effective_from <= ?)",
-                    "(effective_to IS NULL OR effective_to > ?)",
-                ]
-            )
-            parameters.extend([as_of, as_of])
-        elif not include_historical:
-            now = utc_now()
-            where.extend(
-                [
-                    "is_current = 1",
-                    "(effective_from IS NULL OR effective_from <= ?)",
-                    "(effective_to IS NULL OR effective_to > ?)",
-                ]
-            )
-            parameters.extend([now, now])
-        with self._connect() as connection:
-            rows = connection.execute(
-                "SELECT id FROM knowledge_documents WHERE " + " AND ".join(where),
-                parameters,
-            ).fetchall()
-        return [str(row["id"]) for row in rows]
+        return list(self.retrieval_snapshot(
+            knowledge_base_id, document_ids=document_ids, versions=versions,
+            as_of=as_of, include_historical=include_historical,
+        )[1])
+
+    def retrieval_snapshot(self, knowledge_base_id: str, **filters):
+        return retrieval_snapshot(self, knowledge_base_id, **filters)
 
     def has_active_documents(self, knowledge_base_id: str) -> bool:
         with self._connect() as connection:
@@ -544,6 +520,8 @@ class KnowledgeStore:
         incoming = {_chunk_key(chunk): chunk for chunk in chunks}
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            if connection.execute("SELECT index_rebuild_pending FROM knowledge_bases WHERE id = ?", (knowledge_base_id,)).fetchone()[0]:
+                raise InvalidKnowledgeStateError("cannot ingest while an index rebuild is awaiting publication")
             duplicate_row = connection.execute(
                 "SELECT * FROM knowledge_documents "
                 "WHERE knowledge_base_id = ? AND content_hash = ?",
@@ -728,12 +706,8 @@ class KnowledgeStore:
                         (*values, chunk_id),
                     )
 
-            if removed_vector_ids:
-                connection.executemany(
-                    "INSERT OR IGNORE INTO vector_deletions (chunk_id, created_at) "
-                    "VALUES (?, ?)",
-                    [(chunk_id, now) for chunk_id in set(removed_vector_ids)],
-                )
+            # Published/in-flight snapshots still refer to retired vector IDs.
+            # Keep them until explicit document deletion; no eager reclamation.
 
             batch_ids = self._insert_batches(
                 connection, document_id, generation, pending_chunk_ids, batch_size, now
@@ -769,10 +743,12 @@ class KnowledgeStore:
                     document_id,
                 ),
             )
+            if status == "ready":
+                publish_ready(self, connection, document_id, now)
         return (
             self.get_document(document_id),
             batch_ids,
-            sorted(set(removed_vector_ids)),
+            [],
             False,
         )
 
@@ -1131,9 +1107,8 @@ class KnowledgeStore:
             )
             self._refresh_document(connection, batch["document_id"], now)
 
-    @staticmethod
     def _refresh_document(
-        connection: sqlite3.Connection, document_id: str, now: str
+        self, connection: sqlite3.Connection, document_id: str, now: str
     ) -> None:
         counts = connection.execute(
             """
@@ -1184,6 +1159,8 @@ class KnowledgeStore:
                 document_id,
             ),
         )
+        if status == "ready":
+            publish_ready(self, connection, document_id, now)
 
     def retry_failed_batches(self, document_id: str) -> list[str]:
         self.get_document(document_id)
@@ -1241,6 +1218,9 @@ class KnowledgeStore:
         self.get_knowledge_base(knowledge_base_id)
         now = utc_now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute("SELECT index_rebuild_pending FROM knowledge_bases WHERE id = ?", (knowledge_base_id,)).fetchone()[0]:
+                raise InvalidKnowledgeStateError("index rebuild already pending; retry failed batches")
             active = connection.execute(
                 """
                 SELECT COUNT(*) AS count FROM knowledge_documents
@@ -1257,7 +1237,7 @@ class KnowledgeStore:
                 """
                 UPDATE knowledge_bases
                    SET embedding_provider = ?, embedding_model = ?,
-                       embedding_dimensions = ?, updated_at = ?
+                       embedding_dimensions = ?, updated_at = ?, index_rebuild_pending = 1
                  WHERE id = ?
                 """,
                 (
@@ -1281,6 +1261,11 @@ class KnowledgeStore:
                     "DELETE FROM embedding_batches WHERE document_id = ?",
                     (document_id,),
                 )
+                # New physical identities keep old model vectors readable by
+                # queries which already captured the published generation.
+                for chunk_row in connection.execute("SELECT id FROM knowledge_chunks WHERE document_id = ?", (document_id,)).fetchall():
+                    replacement = hashlib.sha256(f"{chunk_row['id']}:{generation}".encode()).hexdigest()[:32]
+                    connection.execute("UPDATE knowledge_chunks SET id = ? WHERE id = ?", (replacement, chunk_row["id"]))
                 connection.execute(
                     """
                     UPDATE knowledge_chunks
@@ -1319,13 +1304,34 @@ class KnowledgeStore:
                     """,
                     ("queued" if chunk_ids else "ready", generation, now, document_id),
                 )
+            if not documents:
+                connection.execute("UPDATE knowledge_bases SET index_rebuild_pending = 0 WHERE id = ?", (knowledge_base_id,))
+                kb = dict(connection.execute("SELECT * FROM knowledge_bases WHERE id = ?", (knowledge_base_id,)).fetchone())
+                connection.execute("INSERT INTO published_knowledge_bases VALUES (?, ?, ?) ON CONFLICT(knowledge_base_id) DO UPDATE SET config_json=excluded.config_json, published_at=excluded.published_at", (knowledge_base_id, json.dumps(kb), now))
+            else:
+                publish_ready(self, connection, documents[0]["id"], now)
         return batch_map
 
     def delete_document(self, document_id: str) -> None:
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            document = connection.execute("SELECT knowledge_base_id FROM knowledge_documents WHERE id = ?", (document_id,)).fetchone()
             cursor = connection.execute(
                 "DELETE FROM knowledge_documents WHERE id = ?", (document_id,)
             )
+            if document is not None:
+                knowledge_base_id = document["knowledge_base_id"]
+                kb = connection.execute("SELECT * FROM knowledge_bases WHERE id = ?", (knowledge_base_id,)).fetchone()
+                if kb["index_rebuild_pending"]:
+                    remaining = connection.execute("SELECT id FROM knowledge_documents WHERE knowledge_base_id = ? LIMIT 1", (knowledge_base_id,)).fetchone()
+                    if remaining:
+                        publish_ready(self, connection, remaining["id"], utc_now())
+                    else:
+                        config = dict(kb)
+                        config["index_rebuild_pending"] = 0
+                        now = utc_now()
+                        connection.execute("UPDATE knowledge_bases SET index_rebuild_pending = 0 WHERE id = ?", (knowledge_base_id,))
+                        connection.execute("INSERT INTO published_knowledge_bases VALUES (?, ?, ?) ON CONFLICT(knowledge_base_id) DO UPDATE SET config_json=excluded.config_json, published_at=excluded.published_at", (knowledge_base_id, json.dumps(config), now))
         if cursor.rowcount != 1:
             raise KnowledgeDocumentNotFoundError(document_id)
 

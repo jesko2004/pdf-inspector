@@ -479,7 +479,7 @@ curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/documents/DOCUMENT_I
 
 - A unique PDF file hash prevents the same file from being inserted twice into one knowledge base, even under different document keys.
 - A chunk-set hash detects changes caused by a newer preprocessing pipeline even when the source PDF is unchanged.
-- Revisions submitted with the same `document_key` compare chunk kind, section, pages, and content hash. Unchanged indexed chunks keep their vectors; new or changed chunks are embedded; removed vectors are deleted through a durable cleanup queue.
+- Revisions submitted with the same `document_key` compare chunk kind, section, pages, and content hash. Unchanged indexed chunks keep their vectors; new or changed chunks are embedded. Retired vectors stay available to in-flight queries and are excluded by the published snapshot; explicit document deletion removes all generations.
 - Batch attempts and errors survive restarts. Interrupted `processing` batches are returned to `queued` during startup.
 
 Rebuild every document after changing the embedding provider, model, or dimensions:
@@ -490,7 +490,7 @@ curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/reindex \
   -d '{"embedding_provider":"openai_compatible","embedding_model":"new-model","embedding_dimensions":1536}'
 ```
 
-Reindexing uses stable chunk IDs and overwrites each vector only after its replacement batch succeeds. A failed batch therefore remains observable and independently retryable rather than forcing the entire document to restart.
+Reindexing allocates new physical chunk IDs and preserves the old published model and vectors. The model configuration and all document snapshots switch together after the entire rebuild succeeds. Failed batches remain observable and independently retryable. See [atomic index publication](atomic-index-publication.md) for migration, failure, history, and storage limits.
 
 ### Search and retrieval evaluation
 
@@ -511,7 +511,7 @@ curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/search \
   }'
 ```
 
-All filters are optional. Page bounds use overlap semantics, so a chunk is included when any of its pages falls inside the requested range. `section_path_prefix` matches the beginning of the complete heading path. Search only considers vectors produced by the knowledge base's current provider, model, and dimensions, preventing stale vectors from a partial reindex from being returned.
+All filters are optional. Page bounds use overlap semantics, so a chunk is included when any of its pages falls inside the requested range. `section_path_prefix` matches the beginning of the complete heading path. Each request pins the published model, document metadata and allowed chunk IDs in one read transaction. Vector and BM25 routes share that snapshot; partial replacement generations remain unpublished.
 
 Every hit has a stable response shape with rank, cosine score, chunk ID, source document/task, original content, content hash, kind, page range, section path, and a ready-to-render `citation` object. The response also records end-to-end search latency.
 

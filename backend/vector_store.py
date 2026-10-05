@@ -46,6 +46,7 @@ class VectorSearchQuery:
     kinds: tuple[str, ...] = ()
     section_path_prefix: tuple[str, ...] = ()
     table_filters: tuple[tuple[str, str], ...] = ()
+    chunk_ids: tuple[str, ...] | None = None
 
 
 @dataclass(frozen=True)
@@ -250,6 +251,9 @@ class SQLiteVectorStore:
             placeholders = ",".join("?" for _ in query.document_ids)
             where.append(f"document_id IN ({placeholders})")
             parameters.extend(query.document_ids)
+        if query.chunk_ids is not None:
+            where.append("chunk_id IN (SELECT value FROM json_each(?))")
+            parameters.append(json.dumps(query.chunk_ids))
         if query.page_start is not None:
             where.append("page_end >= ?")
             parameters.append(query.page_start)
@@ -479,6 +483,9 @@ class PgVectorStore:
         if query.document_ids:
             where.append("document_id = ANY(%s)")
             parameters.append(list(query.document_ids))
+        if query.chunk_ids is not None:
+            where.append("chunk_id = ANY(%s)")
+            parameters.append(list(query.chunk_ids))
         if query.page_start is not None:
             where.append("page_end >= %s")
             parameters.append(query.page_start)
