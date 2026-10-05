@@ -36,6 +36,7 @@ class Settings:
     rag_max_context_tokens: int = 4000
     rag_max_output_tokens: int = 800
     rag_min_evidence_score: float = 0.2
+    rag_answer_format: str = "grounded_json"
     api_keys: tuple[tuple[str, str, str], ...] = field(
         default_factory=tuple, repr=False
     )
@@ -49,6 +50,9 @@ class Settings:
     rerank_top_n: int = 5
     rerank_max_length: int = 256
     rerank_timeout_ms: int = 500
+    rrf_rank_constant: int = 60
+    bm25_k1: float = 1.2
+    bm25_b: float = 0.75
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -106,6 +110,9 @@ class Settings:
         rag_min_evidence_score = float(
             os.environ.get("PDF_INSPECTOR_RAG_MIN_EVIDENCE_SCORE", "0.2")
         )
+        rag_answer_format = os.environ.get(
+            "PDF_INSPECTOR_RAG_ANSWER_FORMAT", "grounded_json"
+        ).lower()
         api_keys_raw = os.environ.get("PDF_INSPECTOR_API_KEYS_JSON", "[]")
         search_rate_limit = int(
             os.environ.get("PDF_INSPECTOR_SEARCH_RATE_LIMIT_PER_MINUTE", "120")
@@ -129,6 +136,13 @@ class Settings:
         rerank_timeout_ms = int(
             os.environ.get("PDF_INSPECTOR_RERANK_TIMEOUT_MS", "500")
         )
+        rrf_rank_constant = int(os.environ.get("PDF_INSPECTOR_RRF_K", "60"))
+        bm25_k1 = float(os.environ.get("PDF_INSPECTOR_BM25_K1", "1.2"))
+        bm25_b = float(os.environ.get("PDF_INSPECTOR_BM25_B", "0.75"))
+        if not 1 <= rrf_rank_constant <= 10000:
+            raise ValueError("PDF_INSPECTOR_RRF_K must be between 1 and 10000")
+        if not 0 < bm25_k1 <= 10 or not 0 <= bm25_b <= 1:
+            raise ValueError("BM25 requires 0 < K1 <= 10 and 0 <= B <= 1")
         ocr_command = None
         if ocr_command_raw:
             parsed = json.loads(ocr_command_raw)
@@ -205,6 +219,10 @@ class Settings:
         if not 1 <= rag_max_output_tokens <= 16000:
             raise ValueError(
                 "PDF_INSPECTOR_RAG_MAX_OUTPUT_TOKENS must be between 1 and 16000"
+            )
+        if rag_answer_format not in {"grounded_json", "text"}:
+            raise ValueError(
+                "PDF_INSPECTOR_RAG_ANSWER_FORMAT must be grounded_json or text"
             )
         if not -1 <= rag_min_evidence_score <= 1:
             raise ValueError(
@@ -315,6 +333,7 @@ class Settings:
             rag_max_context_tokens=rag_max_context_tokens,
             rag_max_output_tokens=rag_max_output_tokens,
             rag_min_evidence_score=rag_min_evidence_score,
+            rag_answer_format=rag_answer_format,
             api_keys=tuple(api_keys),
             search_rate_limit_per_minute=search_rate_limit,
             ask_rate_limit_per_minute=ask_rate_limit,
@@ -326,6 +345,9 @@ class Settings:
             rerank_top_n=rerank_top_n,
             rerank_max_length=rerank_max_length,
             rerank_timeout_ms=rerank_timeout_ms,
+            rrf_rank_constant=rrf_rank_constant,
+            bm25_k1=bm25_k1,
+            bm25_b=bm25_b,
         )
 
     @property

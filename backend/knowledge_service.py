@@ -6,6 +6,7 @@ import hashlib
 import json
 import logging
 import math
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from concurrent.futures import TimeoutError as FutureTimeoutError
 from pathlib import Path
@@ -21,9 +22,11 @@ from .knowledge_store import (
     KnowledgeDocumentNotFoundError,
     KnowledgeStore,
 )
+from .lexical_retrieval import bm25_search
 from .reranking import RerankerProvider, create_reranker
 from .service import ResultNotReadyError, TaskService
 from .task_store import RESULT_STATUSES
+from .table_query import compile_filters, matching_rows, project_rows
 from .vector_store import VectorRecord, VectorSearchHit, VectorSearchQuery, VectorStore
 
 EmbeddingFactory = Callable[[str, str, int], EmbeddingProvider]
@@ -365,6 +368,7 @@ class KnowledgeService:
         self,
         hits: list[VectorSearchHit],
         fusion: dict[str, tuple[float, list[str]]] | None = None,
+        table_filters=None,
     ) -> list[dict[str, Any]]:
         documents = {
             document_id: self.store.get_document(document_id)
@@ -382,9 +386,19 @@ class KnowledgeService:
                 if isinstance(parent_pages, list) and parent_pages
                 else pages
             )
+            content = hit.text
+            context_content = hit.metadata.get("parent_text", hit.text)
+            parent_id = hit.metadata.get("parent_id")
+            matched_table_rows = []
+            if table_filters:
+                content, matched_table_rows = project_rows(hit.metadata, table_filters)
+                context_content = content
+                context_pages = pages
+                parent_id = f"table-match:{hit.chunk_id}"
             citation = {
                 "chunk_id": hit.chunk_id,
                 "document_id": document["id"],
+                "task_id": document["task_id"],
                 "document_key": document["document_key"],
                 "filename": document["filename"],
                 "version": document.get("version"),
@@ -397,6 +411,9 @@ class KnowledgeService:
                     "rank": rank,
                     "original_rank": rank,
                     "score": round(hit.score, 8),
+                    "score_kind": hit.metadata.get("score_kind", "cosine"),
+                    "semantic_score": None if hit.metadata.get("score_kind") == "bm25" else round(hit.score, 8),
+                    "bm25_score": round(hit.score, 8) if hit.metadata.get("score_kind") == "bm25" else None,
                     "chunk_id": hit.chunk_id,
                     "document_id": document["id"],
                     "document_key": document["document_key"],
@@ -406,11 +423,12 @@ class KnowledgeService:
                     "effective_from": document.get("effective_from"),
                     "effective_to": document.get("effective_to"),
                     "is_current": document.get("is_current", True),
-                    "content": hit.text,
-                    "context_content": hit.metadata.get("parent_text", hit.text),
-                    "parent_id": hit.metadata.get("parent_id"),
+                    "content": content,
+                    "context_content": context_content,
+                    "parent_id": parent_id,
                     "context_pages": context_pages,
                     "table": hit.metadata.get("table"),
+                    "matched_table_rows": matched_table_rows,
                     "content_hash": hit.content_hash,
                     "kind": hit.kind,
                     "page_start": hit.page_start,
@@ -522,10 +540,18 @@ class KnowledgeService:
         rewrite_query: bool = False,
         max_query_variants: int = 3,
         rerank: bool = False,
+        retrieval_mode: str = "vector",
+        rrf_k: int | None = None,
         include_historical: bool = False,
         versions: list[str] | None = None,
         as_of: str | None = None,
     ) -> dict[str, Any]:
+        if retrieval_mode not in {"vector", "bm25", "hybrid"}:
+            raise ValueError("retrieval_mode must be vector, bm25 or hybrid")
+        rank_constant = self.settings.rrf_rank_constant if rrf_k is None else rrf_k
+        if not 1 <= rank_constant <= 10000:
+            raise ValueError("rrf_k must be between 1 and 10000")
+        table_filters = compile_filters(table_filters)
         started = perf_counter()
         knowledge_base = self.store.get_knowledge_base(knowledge_base_id)
         variants = (
@@ -548,7 +574,10 @@ class KnowledgeService:
                 "knowledge_base_id": knowledge_base_id,
                 "query": query,
                 "query_variants": variants,
-                "route_count": len(variants),
+                "route_count": 0,
+                "routes": [],
+                "retrieval_mode": retrieval_mode,
+                "rrf_k": rank_constant,
                 "top_k": top_k,
                 "min_score": min_score,
                 "returned": 0,
@@ -560,14 +589,28 @@ class KnowledgeService:
                 ],
                 "items": [],
             }
-        provider = self.embedding_factory(
-            knowledge_base["embedding_provider"],
-            knowledge_base["embedding_model"],
-            int(knowledge_base["embedding_dimensions"]),
-        )
-        vectors = self._embed(provider, variants)
-        if len(vectors) != len(variants):
-            raise ValueError("embedding provider returned an unexpected batch size")
+        snapshot = None
+        if table_filters:
+            snapshot = self.store.indexed_chunk_snapshot(knowledge_base_id, eligible_document_ids)
+            # Resolve column ambiguity before spending query embedding tokens.
+            for chunk in snapshot:
+                if (page_start is not None and chunk["page_end"] < page_start) or (page_end is not None and chunk["page_start"] > page_end):
+                    continue
+                if kinds and chunk["kind"] not in kinds:
+                    continue
+                if chunk["section_path"][:len(section_path_prefix)] != section_path_prefix:
+                    continue
+                matching_rows(chunk.get("metadata", {}), table_filters)
+        vectors = []
+        if retrieval_mode != "bm25":
+            provider = self.embedding_factory(
+                knowledge_base["embedding_provider"],
+                knowledge_base["embedding_model"],
+                int(knowledge_base["embedding_dimensions"]),
+            )
+            vectors = self._embed(provider, variants)
+            if len(vectors) != len(variants):
+                raise ValueError("embedding provider returned an unexpected batch size")
         retrieval_started = perf_counter()
         route_inputs = []
         for variant, raw_vector in zip(variants, vectors):
@@ -594,23 +637,35 @@ class KnowledgeService:
                 ),
             )
 
-        if len(route_inputs) == 1:
+        if not route_inputs:
+            routes = []
+        elif len(route_inputs) == 1:
             routes = [retrieve(route_inputs[0])]
         else:
             with ThreadPoolExecutor(
                 max_workers=len(route_inputs), thread_name_prefix="retrieval-route"
             ) as route_executor:
                 routes = list(route_executor.map(retrieve, route_inputs))
+        if retrieval_mode in {"bm25", "hybrid"}:
+            if snapshot is None:
+                snapshot = self.store.indexed_chunk_snapshot(knowledge_base_id, eligible_document_ids)
+            for variant in variants:
+                routes.append((f"bm25:{variant}", bm25_search(
+                    variant, snapshot, knowledge_base_id=knowledge_base_id,
+                    top_k=min(candidate_limit * 2, 100), page_start=page_start,
+                    page_end=page_end, kinds=kinds, section_path_prefix=section_path_prefix,
+                    table_filters=table_filters, k1=self.settings.bm25_k1, b=self.settings.bm25_b,
+                )))
         if self.metrics is not None:
             self.metrics.observe("retrieval", perf_counter() - retrieval_started)
         if len(routes) == 1:
             hits = routes[0][1][:candidate_limit]
-            items = self._format_hits(hits)
+            items = self._format_hits(hits, table_filters=table_filters)
         else:
-            fused = reciprocal_rank_fusion(routes, limit=candidate_limit)
+            fused = reciprocal_rank_fusion(routes, limit=candidate_limit, rank_constant=rank_constant)
             hits = [hit for hit, _score, _queries in fused]
             fusion = {hit.chunk_id: (score, queries) for hit, score, queries in fused}
-            items = self._format_hits(hits, fusion)
+            items = self._format_hits(hits, fusion, table_filters=table_filters)
         items, rerank_metadata = self._rerank_items(
             query,
             items,
@@ -622,6 +677,13 @@ class KnowledgeService:
             "query": query,
             "query_variants": variants,
             "route_count": len(routes),
+            "retrieval_mode": retrieval_mode,
+            "rrf_k": rank_constant,
+            "routes": [
+                {"query": route_query, "kind": "vector" if index < len(route_inputs) else "bm25",
+                 "hits": [{"chunk_id": hit.chunk_id, "score": hit.score} for hit in route_hits]}
+                for index, (route_query, route_hits) in enumerate(routes)
+            ],
             "top_k": top_k,
             "min_score": min_score,
             "returned": len(items),
@@ -637,7 +699,12 @@ class KnowledgeService:
         if item["document_id"] != expected["document_id"]:
             return False
         expected_pages = set(expected.get("pages", []))
-        return not expected_pages or bool(expected_pages.intersection(item["pages"]))
+        if expected_pages and not expected_pages.intersection(item["pages"]):
+            return False
+        def normalized(value):
+            return "".join(unicodedata.normalize("NFKC", value).casefold().split())
+        content = normalized(item["content"])
+        return all(normalized(fragment) in content for fragment in expected.get("required_text", []))
 
     def evaluate_retrieval(
         self,
@@ -657,11 +724,13 @@ class KnowledgeService:
         compare_rewrite: bool = False,
         rerank: bool = False,
         compare_rerank: bool = False,
+        retrieval_mode: str = "vector",
+        rrf_k: int | None = None,
         include_historical: bool = False,
         versions: list[str] | None = None,
         as_of: str | None = None,
     ) -> dict[str, Any]:
-        if rewrite_query or compare_rewrite or rerank or compare_rerank:
+        if rewrite_query or compare_rewrite or rerank or compare_rerank or retrieval_mode != "vector" or rrf_k is not None or table_filters:
             advanced_rewrite = rewrite_query or compare_rewrite
             advanced_rerank = rerank or compare_rerank
             advanced = self._evaluate_search_routes(
@@ -678,6 +747,8 @@ class KnowledgeService:
                 rewrite_query=advanced_rewrite,
                 max_query_variants=max_query_variants,
                 rerank=advanced_rerank,
+                retrieval_mode=retrieval_mode,
+                rrf_k=rrf_k,
                 include_historical=include_historical,
                 versions=versions or [],
                 as_of=as_of,
@@ -697,6 +768,8 @@ class KnowledgeService:
                     rewrite_query=rewrite_query if not compare_rewrite else False,
                     max_query_variants=max_query_variants,
                     rerank=rerank if not compare_rerank else False,
+                    retrieval_mode=retrieval_mode,
+                    rrf_k=rrf_k,
                     include_historical=include_historical,
                     versions=versions,
                     as_of=as_of,
@@ -889,6 +962,8 @@ class KnowledgeService:
             "top_k": search_options["top_k"],
             "rewrite_query": search_options["rewrite_query"],
             "rerank": search_options["rerank"],
+            "retrieval_mode": search_options.get("retrieval_mode", "vector"),
+            "rrf_k": search_options.get("rrf_k") or self.settings.rrf_rank_constant,
             "rerank_applied_cases": sum(
                 result["rerank"]["applied"] for result in results
             ),
@@ -949,7 +1024,20 @@ class KnowledgeService:
                 document["embedding_model"],
                 int(document["embedding_dimensions"]),
             )
-            vectors = self._embed(provider, [chunk["text"] for chunk in chunks])
+            payload_hash = hashlib.sha256(json.dumps({
+                "provider": document["embedding_provider"],
+                "model": document["embedding_model"],
+                "dimensions": document["embedding_dimensions"],
+                "generation": document["generation"],
+                "chunks": [(chunk["id"], chunk["content_hash"], chunk["text"]) for chunk in chunks],
+            }, sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+            vectors = self.store.get_embedding_checkpoint(batch_id, payload_hash)
+            if vectors is None:
+                vectors = self._embed(provider, [chunk["text"] for chunk in chunks])
+                if len(vectors) != len(chunks):
+                    raise ValueError("embedding provider returned an unexpected batch size")
+                vectors = [self._normalize_vector(vector, int(document["embedding_dimensions"])) for vector in vectors]
+                self.store.save_embedding_checkpoint(batch_id, payload_hash, vectors)
             if len(vectors) != len(chunks):
                 raise ValueError("embedding provider returned an unexpected batch size")
             records = []

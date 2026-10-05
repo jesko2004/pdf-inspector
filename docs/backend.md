@@ -33,6 +33,12 @@ traffic.
 
 The service listens on `127.0.0.1:8000`. OpenAPI documentation is available at `http://127.0.0.1:8000/docs`.
 
+The local upload/query/source-review/feedback page is at `/demo`. See
+[the minimum landing report](minimum-landing.md) for reproducible offline evaluation
+and the remaining real-model acceptance work. The console launcher refuses a
+non-loopback host unless API keys are configured. One OS-owned executor lock is
+held per data directory; do not run multiple Uvicorn workers against it.
+
 Environment variables:
 
 | Variable | Default | Meaning |
@@ -61,6 +67,10 @@ Environment variables:
 | `PDF_INSPECTOR_ASK_RATE_LIMIT_PER_MINUTE` | `30` | Per-key/IP answer requests per minute |
 | `PDF_INSPECTOR_MAX_ACTIVE_TASKS` | `100` | Maximum combined queued and processing PDF tasks |
 | `PDF_INSPECTOR_QUERY_ALIASES_JSON` | `{}` | Optional abbreviation-to-expansion map used by bounded query rewriting |
+| `PDF_INSPECTOR_RRF_K` | `60` | RRF rank constant (1-10000); request `rrf_k` can override it |
+| `PDF_INSPECTOR_BM25_K1` | `1.2` | BM25 term-frequency saturation (greater than 0, at most 10) |
+| `PDF_INSPECTOR_BM25_B` | `0.75` | BM25 length normalization (0-1) |
+| `PDF_INSPECTOR_RAG_ANSWER_FORMAT` | `grounded_json` | External model contract: `grounded_json` or compatibility `text`; extractive mode always previews evidence |
 | `PDF_INSPECTOR_RERANK_PROVIDER` | `none` | `none` or optional local `flashrank` reranking |
 | `PDF_INSPECTOR_RERANK_MODEL` | `ms-marco-MultiBERT-L-12` | FlashRank model; the default supports multilingual workloads |
 | `PDF_INSPECTOR_RERANK_CANDIDATES` | `12` | RRF candidates sent to the second-stage reranker (2-100) |
@@ -69,6 +79,102 @@ Environment variables:
 | `PDF_INSPECTOR_RERANK_TIMEOUT_MS` | `500` | Fail-open reranking time budget (10-30000 ms) |
 
 For multi-host deployment, replace the in-process executor and local files with a shared queue/object store. A single service process is durable across restarts: SQLite retains tasks and interrupted `processing` tasks are queued again on startup.
+
+## Minimum landing retrieval and answer contract
+
+Search, ask, and retrieval-evaluation requests accept `retrieval_mode` with values
+`vector` (the compatibility default), `bm25`, or `hybrid`, and optional `rrf_k`.
+BM25 searches the eligible indexed-child snapshot and applies the same version,
+document, page, kind, section, and table scopes. It tokenizes complete ASCII model
+identifiers and Chinese characters/bigrams after NFKC normalization. It scans a
+small corpus rather than maintaining a large inverted index. BM25-only queries
+do not call the query embedding provider; ingestion still uses the existing
+embedding lifecycle.
+
+`min_score` applies only to vector cosine scores. BM25 positive scores and RRF
+scores are ranking signals, not calibrated answerability thresholds. Results
+include `score_kind`, nullable `semantic_score`/`bm25_score`, `fusion_score`, and
+per-route raw candidates under `routes`. When a chunk occurs in both routes, its
+top-level raw score comes from the first retained hit; inspect the route trace
+for both scores. Rewriting can multiply route votes, so redundant variants should
+be controlled separately.
+
+Evaluation expected sources can include `required_text`, a list of normalized
+text fragments that must occur in the child evidence in addition to matching
+document/pages. This avoids counting any chunk on a correct page as relevant;
+it remains a lexical diagnostic rather than semantic grading.
+
+After a batch embedding response is normalized, vectors are persisted in a
+checkpoint before vector upsert and completion confirmation. Retries reuse the
+checkpoint only for the same provider/model/dimensions/generation/chunks payload.
+Successful completion removes it. A crash between provider response and checkpoint
+commit can still cause another billable call; no provider exactly-once guarantee
+or global generation cache is claimed.
+
+Answers report final `status`, `refused`, `claims`, and `validation`, including
+streaming completion events. External models default to a strict JSON contract:
+an `answerable` boolean and a list of claims, each carrying supplied `chunk_id`
+values and verbatim evidence quotes. Unknown fields, duplicate JSON keys,
+inconsistent flags, missing sources, and quotes outside the exact truncated
+context fail validation. The server renders filenames and pages and returns
+only citations used by the claims. No automatic model repair/retry is performed.
+`completed` means this contract and quote membership passed; it does not certify
+semantic entailment. `validation.semantic_support` makes that boundary explicit.
+Extractive evidence previews and compatibility `text` answers are `needs_review`.
+Canonical refusal clears citations. Empty text and invalid inline file/page
+identities in compatibility mode are generation errors.
+Source attributes and body text are escaped before prompt assembly. Context
+metadata distinguishes parent deduplication from truncation/omission and declares
+`counting_method: character_estimate`; exact model-window accounting is pending.
+
+`GET /demo` serves only the static local page. Data requests still require their
+normal role permissions when authentication is enabled. `GET /v1/tasks/{id}/source`
+returns the managed original PDF through the read permission; it accepts a task
+identity. `GET /v1/tasks/{id}/source/pages/{page}.png` renders one protected page,
+with a 2-million-pixel output limit and a 4096-pixel maximum edge. The backend
+extra includes PyMuPDF. The page preview avoids dependence on browser PDF plugins;
+the original download remains available. Output bounds are not hard memory/CPU
+isolation for decoding an arbitrary PDF. Unknown tasks/pages return 404, corrupt
+PDFs 422, and a missing preview dependency 503. Images use `Cache-Control: no-store`.
+
+The demo shows verbatim evidence per claim and lets users mark each citation
+supported/unsupported/unreviewed and provide a correction. Helpful feedback never
+automatically marks all citations valid. New citations include the managed task
+ID; legacy citations resolve through the single-document endpoint, without a
+200-document listing limit. Offline previews return only their first excerpt's
+source citation.
+
+For real-model setup, run `python -m scripts.check_models --output readiness.json`.
+Missing configuration triggers no calls. Once configured, the probe makes a small
+embedding batch plus grounded generation/stream requests using a non-sensitive
+fixture; these requests can consume paid tokens. This is contract validation only.
+Reports do not retain raw provider error bodies that might echo credentials.
+
+`python -m scripts.minimum_landing --work-dir EVAL_DIR --output report.json`
+keeps an isolated SQLite corpus and atomic evaluation checkpoints. Add `--resume`
+to reuse completed units and `--retry-failed` to explicitly rerun failures. The
+fingerprint covers input bytes, dataset, provider/model/endpoints, budgets and
+pipeline code; key rotation is allowed. Existing service directories are rejected.
+Per-case errors are retained while other questions continue. Interrupted provider
+responses that were not saved can still be billed again, and retrying a failed
+retrieval configuration can repeat query embeddings within that unit. Report usage
+totals cover successful retained generation responses, not total billing.
+
+Benchmark datasets now validate unique IDs, document references, strict answerable
+flags, positive pages and required evidence before execution. The bilingual v2
+fixture has 30 English/Chinese cases; labels still require human review and both
+splits share document families. `python -m scripts.score_landing prepare` exports
+an unreviewed JSON template and per-case Markdown sheet from a saved report.
+`score` grades that report without any model calls, separates machine diagnostics
+from explicit human verdicts, reports review coverage and binds reviews to dataset
+and report hashes. Use `--dataset`, `--report`, `--output-dir` and optionally
+`--reviews`; outputs refuse overwrite unless `--overwrite` is supplied.
+The reviewer field records attribution; it does not authenticate a reviewer.
+
+Original source lookup accepts a task
+identity, not an arbitrary filesystem path. The page uses `manual_query`, lets
+users select a retrieval mode, view source pages, and submit feedback. It is
+designed for a small local corpus.
 
 ## Production controls
 
@@ -88,7 +194,7 @@ Every response includes `X-Request-ID`; a valid caller-supplied ID is preserved.
 
 Upload bytes, active tasks, per-key/IP search and answer frequency, and RAG context/output Tokens are bounded. Rate and capacity failures return HTTP `429` with a stable error detail; rate responses include `Retry-After`. The in-memory rate limiter is intentionally single-process. Use a gateway or Redis-backed limiter when phase-5 multi-instance work is enabled.
 
-SQLite stores maintain a `schema_migrations` ledger and validate migration names/versions at startup. Migrations run transactionally and are forward-only. The knowledge store schema is currently version 2; future schema changes must be appended as a new migration. Roll back an incompatible release by restoring its verified pre-upgrade backup rather than attempting an in-place downgrade.
+SQLite stores maintain a `schema_migrations` ledger and validate migration names/versions at startup. Migrations run transactionally and are forward-only. The knowledge store schema is currently version 4; future schema changes must be appended as a new migration. Roll back an incompatible release by restoring its verified pre-upgrade backup rather than attempting an in-place downgrade.
 
 Create, verify, and restore a complete local backup:
 
@@ -431,6 +537,8 @@ Table chunks carry normalized headers, rows, and cell coordinates. Their embeddi
 }
 ```
 
+表格字符串过滤采用等值匹配。数值区间、显式单位／币种、重名列身份和命中行证据投影见 [精确表格查询](precise-table-query.md)；需要子串匹配须使用 `contains`。
+
 Set `rewrite_query: true` to remove common conversational prefixes, split bounded compound questions, batch their embeddings, retrieve up to five routes concurrently, deduplicate, and rank them with reciprocal-rank fusion. Search responses expose `query_variants`, `matched_queries`, semantic score, fusion score, and route count. Retrieval evaluation accepts `compare_rewrite: true` and reports baseline Recall@K/MRR/latency plus deltas, so query rewriting must demonstrate measurable value rather than being enabled by assumption.
 
 Install the `rag-langchain` extra, configure `PDF_INSPECTOR_RERANK_PROVIDER=flashrank`, and send `"rerank": true` to apply a local second-stage reranker. RRF first returns up to `RERANK_CANDIDATES`; FlashRank scores the smaller child chunks and returns at most `RERANK_TOP_N`; only then does RAG restore parent context. Results retain `original_rank`, semantic/fusion scores, `rerank_score`, and a trace showing whether reranking was applied. Initialization errors, inference errors, and timeouts fail open to the original RRF order and increment fallback metrics.
@@ -497,6 +605,7 @@ $env:PDF_INSPECTOR_LLM_MODEL='chat-model'
 $env:PDF_INSPECTOR_RAG_MAX_CONTEXT_TOKENS='4000'
 $env:PDF_INSPECTOR_RAG_MAX_OUTPUT_TOKENS='800'
 $env:PDF_INSPECTOR_RAG_MIN_EVIDENCE_SCORE='0.2'
+$env:PDF_INSPECTOR_RAG_ANSWER_FORMAT='grounded_json'
 ```
 
 Ask a grounded question:
@@ -507,9 +616,39 @@ curl -X POST http://127.0.0.1:8000/v1/knowledge-bases/KB_ID/ask \
   -d '{"question":"How do I install the controller?","top_k":6}'
 ```
 
-The response includes the answer, refusal flag, source citations, retrieval timing, context-token estimate, truncation status, provider/model, usage, and generation latency. Context selection follows search rank and never exceeds the configured budget; an oversized final chunk is truncated. When no result meets the evidence threshold, the service returns a fixed bilingual refusal without calling the LLM.
+The response includes the answer, refusal flag, source citations, retrieval timing, context-token estimate, truncation status, provider/model, usage, and generation latency. Context selection follows search rank and stays within the configured character-estimate source budget; an oversized final chunk is truncated. When no result meets the evidence threshold, the service returns a fixed bilingual refusal without calling the LLM.
 
-Set `"stream": true` to receive Server-Sent Events. The stream emits `metadata`, one or more `token` events, then `done`; provider failures are returned as an `error` event. Proxy buffering is disabled through response headers.
+`context.selection` explains each candidate as `selected`, `duplicate_parent`,
+`body_truncated`, `budget_omitted` or `empty_content`. `truncated` only covers body
+cuts and budget omissions; deduplication alone is not truncation. Source token
+estimates include block separators. `prompt_estimated_tokens` estimates system
+and user message contents, and `estimated_total_with_output_reserve` includes the
+generation reserve. These estimates exclude chat framing and model tokenization;
+`model_window_verified` remains false. They are diagnostics, not a guarantee that
+the full request fits a real model's context window.
+
+The external model must return this JSON shape (the API returns a rendered answer,
+not this raw model payload):
+
+```json
+{"answerable":true,"claims":[{"text":"A concise answer","evidence":[{"chunk_id":"SUPPLIED_CHUNK_ID","quote":"Exact text from the supplied source"}]}]}
+```
+
+When evidence does not answer the question, the model returns
+`{"answerable":false,"claims":[]}`. Prompting and quote checks do not independently
+prove that the question is answerable; real-model negative-case evaluation is required.
+Use `text` only for models that cannot follow the JSON contract; those results
+remain `needs_review`. JSON overhead and evidence quotes consume the output budget.
+Malformed or token-limited output fails rather than triggering another billable call.
+
+Set `"stream": true` to receive Server-Sent Events. Structured mode emits `metadata`,
+buffers the model JSON, then emits a rendered `token` and `done` only after validation.
+`metadata.buffered_until_validated` declares this behavior. On failure it emits
+`error` without a final answer or saved successful answer. Extractive/text modes
+retain incremental tokens. A provider stream needs `[DONE]` or `finish_reason: stop`;
+premature EOF, provider errors, and length-limited finishes fail. Status, validation
+and claims are persisted for both normal and streaming answers; legacy saved
+non-refusal answers migrate to `needs_review`. Proxy buffering is disabled.
 
 ## API summary
 

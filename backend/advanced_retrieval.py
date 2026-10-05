@@ -8,6 +8,8 @@ import unicodedata
 from collections import defaultdict
 from typing import Any
 
+from .table_query import matching_rows
+
 
 def normalize_term(value: str) -> str:
     normalized = unicodedata.normalize("NFKC", value).casefold()
@@ -28,12 +30,15 @@ def table_metadata(markdown: str) -> dict[str, Any]:
     headers = _table_cells(lines[0])
     rows = []
     cells = []
+    row_values = []
+    unique_headers = {header for header in headers if headers.count(header) == 1}
     for row_index, line in enumerate(lines[2:], start=1):
         values = _table_cells(line)
         row = {}
         for column_index, header in enumerate(headers):
             value = values[column_index] if column_index < len(values) else ""
-            row[header] = value
+            if header in unique_headers:
+                row[header] = value
             cells.append(
                 {
                     "row": row_index,
@@ -43,12 +48,16 @@ def table_metadata(markdown: str) -> dict[str, Any]:
                 }
             )
         rows.append(row)
+        row_values.append([values[i] if i < len(values) else "" for i in range(len(headers))])
     context_rows = [
-        "; ".join(f"{header}={row.get(header, '')}" for header in headers)
-        for row in rows
+        "; ".join(f"{header} [column_{i + 1}]={values[i]}" for i, header in enumerate(headers))
+        for values in row_values
     ]
     return {
         "headers": headers,
+        "format_version": 2,
+        "columns": [{"id": f"column_{i + 1}", "index": i + 1, "header": h} for i, h in enumerate(headers)],
+        "row_values": row_values,
         "rows": rows,
         "cells": cells,
         "semantic_text": "Table columns: "
@@ -159,6 +168,8 @@ class RuleBasedQueryRewriter:
 def reciprocal_rank_fusion(
     routes: list[tuple[str, list]], *, limit: int, rank_constant: int = 60
 ) -> list[tuple[Any, float, list[str]]]:
+    if rank_constant < 1:
+        raise ValueError("RRF rank constant must be positive")
     fused: dict[str, tuple[Any, float, list[str]]] = {}
     for query, hits in routes:
         for rank, hit in enumerate(hits, start=1):
@@ -178,26 +189,10 @@ def reciprocal_rank_fusion(
     return ranked[:limit]
 
 
-def table_matches(
-    metadata: dict[str, Any], filters: tuple[tuple[str, str], ...]
-) -> bool:
+def table_matches(metadata: dict[str, Any], filters: tuple) -> bool:
     if not filters:
         return True
-    table = metadata.get("table")
-    if not isinstance(table, dict):
-        return False
-    rows = table.get("rows", [])
-    for row in rows:
-        normalized_row = {
-            normalize_term(str(key)): str(value) for key, value in row.items()
-        }
-        if all(
-            normalize_term(expected)
-            in normalize_term(normalized_row.get(normalize_term(key), ""))
-            for key, expected in filters
-        ):
-            return True
-    return False
+    return bool(matching_rows(metadata, dict(filters)))
 
 
 def redact_feedback_text(value: str) -> str:

@@ -1,9 +1,10 @@
 import unittest
 from pathlib import Path
+from dataclasses import replace
 from tempfile import TemporaryDirectory
 
 from backend.config import Settings
-from backend.llm import LlmResult
+from backend.llm import LlmResult, estimate_tokens
 from backend.rag_service import REFUSAL, RagService
 
 
@@ -129,6 +130,71 @@ class RagServiceTests(unittest.TestCase):
             ["metadata", "token", "token", "done"], [e["event"] for e in events]
         )
         self.assertEqual("grounded answer", events[-1]["data"]["answer"])
+
+    def test_parent_deduplication_does_not_mean_truncation(self):
+        with TemporaryDirectory() as temporary:
+            first = {**source_item(), "parent_id": "parent-1"}
+            duplicate = {**first, "chunk_id": "chunk-2"}
+            service = RagService(self.settings(temporary), FakeKnowledge([first, duplicate]))
+            prepared = self.prepare(service)
+        self.assertFalse(prepared.context["truncated"])
+        self.assertEqual(1, prepared.context["deduplicated"])
+        self.assertEqual(0, prepared.context["omitted"])
+        self.assertEqual([], prepared.context["truncation_reasons"])
+        self.assertEqual("duplicate_parent", prepared.context["selection"][1]["reason"])
+
+    def test_cut_body_and_later_duplicates_have_distinct_reasons(self):
+        with TemporaryDirectory() as temporary:
+            first = {**source_item("evidence " * 500), "parent_id": "parent-1"}
+            duplicate = {**first, "chunk_id": "chunk-2"}
+            omitted = {**source_item(), "parent_id": "parent-2", "chunk_id": "chunk-3"}
+            service = RagService(self.settings(temporary), FakeKnowledge([first, duplicate, omitted]))
+            prepared = self.prepare(service)
+        self.assertEqual(["body_truncated", "duplicate_parent", "budget_omitted"], [item["reason"] for item in prepared.context["selection"]])
+        self.assertEqual(1, prepared.context["body_truncated"])
+        self.assertEqual(1, prepared.context["budget_omitted"])
+        self.assertEqual(1, prepared.context["deduplicated"])
+        self.assertEqual(1, prepared.context["omitted"])
+
+    def test_wrapper_too_large_omits_parent_once(self):
+        with TemporaryDirectory() as temporary:
+            first = {**source_item(), "parent_id": "parent-1", "filename": "verylong" * 200}
+            duplicate = {**first, "chunk_id": "chunk-2"}
+            prepared = self.prepare(RagService(self.settings(temporary), FakeKnowledge([first, duplicate])))
+        self.assertTrue(prepared.refused)
+        self.assertEqual(0, prepared.context["body_truncated"])
+        self.assertEqual(1, prepared.context["budget_omitted"])
+        self.assertEqual(1, prepared.context["deduplicated"])
+        self.assertEqual(["budget_omitted"], prepared.context["truncation_reasons"])
+
+    def test_empty_source_is_skipped_without_claiming_budget_truncation(self):
+        with TemporaryDirectory() as temporary:
+            first = source_item(" ")
+            second = {**source_item(), "chunk_id": "chunk-2"}
+            prepared = self.prepare(RagService(self.settings(temporary), FakeKnowledge([first, second])))
+        self.assertFalse(prepared.context["truncated"])
+        self.assertEqual(1, prepared.context["empty_content"])
+        self.assertEqual(1, len(prepared.sources))
+        self.assertEqual("chunk-2", prepared.sources[0]["chunk_id"])
+
+    def test_source_separators_and_prompt_overhead_are_counted_with_explicit_scope(self):
+        with TemporaryDirectory() as temporary:
+            settings = replace(self.settings(temporary), rag_max_context_tokens=512)
+            items = [{**source_item("电压 24V"), "chunk_id": f"chunk-{index}"} for index in range(3)]
+            prepared = self.prepare(RagService(settings, FakeKnowledge(items)))
+        source_content = prepared.messages[1]["content"].split("Sources:\n", 1)[1]
+        self.assertEqual(estimate_tokens(source_content), prepared.context["estimated_tokens"])
+        self.assertLessEqual(prepared.context["estimated_tokens"], 128)
+        self.assertEqual(sum(estimate_tokens(message["content"]) for message in prepared.messages), prepared.context["prompt_estimated_tokens"])
+        self.assertEqual(prepared.context["prompt_estimated_tokens"] + 64, prepared.context["estimated_total_with_output_reserve"])
+        self.assertFalse(prepared.context["model_window_verified"])
+
+    def test_zero_or_negative_explicit_budget_rejected(self):
+        with TemporaryDirectory() as temporary:
+            service = RagService(self.settings(temporary), FakeKnowledge([]))
+            for context_budget, output_budget in ((0, 64), (-1, 64), (128, 0), (128, -1)):
+                with self.subTest(context=context_budget, output=output_budget), self.assertRaisesRegex(ValueError, "positive"):
+                    service.prepare("kb", "question", top_k=5, min_score=0, document_ids=[], page_start=None, page_end=None, kinds=[], section_path_prefix=[], max_context_tokens=context_budget, max_output_tokens=output_budget)
 
 
 if __name__ == "__main__":

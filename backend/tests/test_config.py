@@ -6,6 +6,16 @@ from backend.config import Settings
 
 
 class ConfigTests(unittest.TestCase):
+    def test_grounded_answer_format_default_and_compatibility(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual("grounded_json", Settings.from_env().rag_answer_format)
+        with patch.dict(os.environ, {"PDF_INSPECTOR_RAG_ANSWER_FORMAT": "text"}, clear=True):
+            self.assertEqual("text", Settings.from_env().rag_answer_format)
+
+    def test_unknown_answer_format_is_rejected(self):
+        with patch.dict(os.environ, {"PDF_INSPECTOR_RAG_ANSWER_FORMAT": "unknown"}, clear=True), self.assertRaisesRegex(ValueError, "RAG_ANSWER_FORMAT"):
+            Settings.from_env()
+
     def test_rapidocr_environment_options(self):
         environment = {
             "PDF_INSPECTOR_OCR_PROVIDER": "rapidocr",

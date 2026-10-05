@@ -1,0 +1,12 @@
+{
+  "id": "manual_query",
+  "name": "技术资料查询",
+  "version": 1,
+  "fields": {
+    "document_title": {
+      "aliases": ["Document title", "文档标题"],
+      "required": false
+    }
+  },
+  "tables": {}
+}
