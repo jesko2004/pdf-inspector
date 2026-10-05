@@ -37,6 +37,7 @@ class OcrTests(unittest.TestCase):
                 return f"page-{self.page_index}".encode()
 
         class FakePage:
+            rect = SimpleNamespace(width=595, height=842)
             def __init__(self, page_index):
                 self.page_index = page_index
 

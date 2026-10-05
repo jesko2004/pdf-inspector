@@ -1,0 +1,2086 @@
+{
+  "schema_version": 1,
+  "started_at": "2026-10-05T13:54:50+0800",
+  "platform": "Windows-11-10.0.22631-SP0",
+  "python": "3.12.14",
+  "configuration": {
+    "workers": 1,
+    "max_active_tasks": 3,
+    "process_timeout_seconds": 3,
+    "process_memory_mb": 512,
+    "ocr_provider": "command",
+    "ocr_timeout_seconds": 30
+  },
+  "scope": "synthetic fault experiment on local HTTP; not a production capacity or quality claim",
+  "checks": [
+    {
+      "name": "three tasks admitted",
+      "passed": true
+    },
+    {
+      "name": "fourth task rejected while first three active",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "health responsive during fault",
+      "passed": true
+    },
+    {
+      "name": "slow OCR deadline persisted",
+      "passed": true
+    },
+    {
+      "name": "slow OCR deadline persisted",
+      "passed": true
+    },
+    {
+      "name": "native task after consecutive timeouts succeeded",
+      "passed": true
+    },
+    {
+      "name": "two OCR adapters and two descendants started",
+      "passed": true
+    },
+    {
+      "name": "all OCR descendants stopped",
+      "passed": true
+    },
+    {
+      "name": "preview remains usable",
+      "passed": true
+    },
+    {
+      "name": "corrupt source admitted for async validation",
+      "passed": true
+    },
+    {
+      "name": "corrupt preview is controlled client error",
+      "passed": true
+    },
+    {
+      "name": "final health usable",
+      "passed": true
+    }
+  ],
+  "requests": [
+    {
+      "group": "upload",
+      "method": "POST",
+      "path": "/v1/tasks",
+      "status": 202,
+      "elapsed_ms": 53.095
+    },
+    {
+      "group": "upload",
+      "method": "POST",
+      "path": "/v1/tasks",
+      "status": 202,
+      "elapsed_ms": 44.86
+    },
+    {
+      "group": "upload",
+      "method": "POST",
+      "path": "/v1/tasks",
+      "status": 202,
+      "elapsed_ms": 19.739
+    },
+    {
+      "group": "upload",
+      "method": "POST",
+      "path": "/v1/tasks",
+      "status": 429,
+      "elapsed_ms": 8.237
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.646
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 1.867
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.465
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.447
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.607
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.086
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.706
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.481
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.832
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.662
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.321
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.457
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.904
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.325
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.259
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.22
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.371
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.167
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.103
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.959
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.773
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.274
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.2
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.328
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.303
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.061
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.605
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.543
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.498
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 1.684
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.042
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.113
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.734
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.813
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.196
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.231
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.33
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.698
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.314
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.159
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 0.991
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 1.913
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.638
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.993
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.596
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.117
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.871
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.903
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.789
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.306
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.031
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.663
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.181
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 1.817
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.59
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.557
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.453
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 1.734
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.679
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.568
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.046
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.357
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.068
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.854
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.283
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.791
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.107
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.278
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.187
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.12
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.259
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.105
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.662
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.349
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.075
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.55
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.629
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.281
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.072
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.078
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.167
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 1.598
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.92
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.091
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.465
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.056
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.795
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.74
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.097
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.673
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.137
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.109
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.587
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.216
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.78
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.506
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.149
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.488
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.578
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.51
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.568
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.312
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.996
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.907
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.685
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.233
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.012
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.032
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.763
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.427
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.751
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.558
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.302
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 1.669
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.519
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.454
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.688
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.148
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.872
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.699
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.126
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 1.772
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.937
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.653
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.213
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 3.193
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.289
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.082
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.189
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 1.911
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.629
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.57
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.413
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 3.362
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.546
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.186
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.183
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.16
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.369
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.232
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.538
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.444
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.141
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.097
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.064
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 1.603
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.706
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.759
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.224
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.594
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.393
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.095
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.694
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.557
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.254
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.221
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.837
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.289
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.222
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.139
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.855
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.498
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.222
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.148
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.847
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.669
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.157
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.111
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.119
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.08
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.693
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.404
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.575
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.712
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.186
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.385
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.541
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.405
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.108
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.032
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.449
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.111
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.1
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.159
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.715
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.659
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.123
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.023
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.21
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.078
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.021
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.153
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.589
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.417
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.251
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.229
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.435
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.995
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.299
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.253
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.117
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.798
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.872
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.624
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.058
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.222
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.754
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.036
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.611
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.206
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.606
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.499
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.118
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.089
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.684
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.655
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.632
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.333
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 2.298
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 2.082
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.026
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.476
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.853
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.888
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.475
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.187
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.749
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.454
+    },
+    {
+      "group": "health_during_slow_work",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 2.354
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/4bfabc81-2781-42d3-a312-e36f11c86269",
+      "status": 200,
+      "elapsed_ms": 2.319
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "status": 200,
+      "elapsed_ms": 1.782
+    },
+    {
+      "group": "task_poll",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "status": 200,
+      "elapsed_ms": 1.865
+    },
+    {
+      "group": "preview",
+      "method": "GET",
+      "path": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c/source/pages/1.png",
+      "status": 200,
+      "elapsed_ms": 161.418
+    },
+    {
+      "group": "upload",
+      "method": "POST",
+      "path": "/v1/tasks",
+      "status": 202,
+      "elapsed_ms": 27.562
+    },
+    {
+      "group": "corrupt_preview",
+      "method": "GET",
+      "path": "/v1/tasks/3cbdb85e-b174-4de2-aa41-5befcfe97426/source/pages/1.png",
+      "status": 422,
+      "elapsed_ms": 167.824
+    },
+    {
+      "group": "final_health",
+      "method": "GET",
+      "path": "/health",
+      "status": 200,
+      "elapsed_ms": 1.57
+    }
+  ],
+  "source_sha256": {
+    "backend/process_isolation.py": "b2f11d081e0a461835a7716f3f9e5295b89a0b6031dc838cbe761858f6f1b124",
+    "backend/isolated_worker.py": "4acb49b0491d50202b49dccf891e7f6537e94b2af6f7b40ab9df693b23f6c9ca",
+    "backend/service.py": "73f5bbe02c514b7eacf4d76cd440866b460e637df5649ac60d1766542e7473f3",
+    "backend/config.py": "1cb143793c39cfa7e546cfa5788cba4c461b449a478d97c6ecca7b294a9564c9",
+    "backend/app.py": "4624c6627d1fab5aecb35a22003aeda5718a8e9c27bacc6874f9a9ab5c037263",
+    "backend/ocr.py": "c3b66c6fcd57f45a75ccecdd8eb154553db38a4e93bdc405dae352eedcb3f19d",
+    "backend/source_preview.py": "499e5a737465a8a54b80192fd660fa3ae560527f8bed00c9fc8cea2180f7e9ea",
+    "scripts/check_resource_isolation.py": "eae850f83755e2967ee6a11ac932b0055f2f8667c6997ad55852a89d90160b40"
+  },
+  "native_build": {
+    "version": "unknown",
+    "sha256": "df247301d98aa6f1593b1b4bcaaebfc20d3d296ba8caafb1b9c4498aedeca294"
+  },
+  "input_sha256": {
+    "scanned": "d131331499de20e76f88bd524c2a1a1b2d51bae6518d7a3cdf9fe6cff1a23a61",
+    "native": "789d61c52415aabcdf6ca2edeafd65eefef78883e2fa40559ee447e88f0a1b57"
+  },
+  "tasks": [
+    {
+      "id": "4bfabc81-2781-42d3-a312-e36f11c86269",
+      "filename": "slow-one.pdf",
+      "profile_id": "manual_query",
+      "profile_version": 1,
+      "status": "failed",
+      "attempts": 1,
+      "created_at": "2026-10-05T05:54:50.773+00:00",
+      "updated_at": "2026-10-05T05:54:53.778+00:00",
+      "error": {
+        "code": "ProcessingTimeoutError",
+        "message": "native operation exceeded 3 second deadline"
+      },
+      "result_url": null,
+      "progress": 100
+    },
+    {
+      "id": "fbe708b3-bc21-4e8c-8d14-f00743729834",
+      "filename": "slow-two.pdf",
+      "profile_id": "manual_query",
+      "profile_version": 1,
+      "status": "failed",
+      "attempts": 1,
+      "created_at": "2026-10-05T05:54:50.828+00:00",
+      "updated_at": "2026-10-05T05:54:56.801+00:00",
+      "error": {
+        "code": "ProcessingTimeoutError",
+        "message": "native operation exceeded 3 second deadline"
+      },
+      "result_url": null,
+      "progress": 100
+    },
+    {
+      "id": "560e1f5f-efd8-486c-880e-b6a1af016a0c",
+      "filename": "normal.pdf",
+      "profile_id": "manual_query",
+      "profile_version": 1,
+      "status": "ready",
+      "attempts": 1,
+      "created_at": "2026-10-05T05:54:50.848+00:00",
+      "updated_at": "2026-10-05T05:54:57.043+00:00",
+      "error": null,
+      "result_url": "/v1/tasks/560e1f5f-efd8-486c-880e-b6a1af016a0c/result",
+      "progress": 100
+    }
+  ],
+  "terminated_pids": [
+    24736,
+    7916,
+    25468,
+    22364
+  ],
+  "queue_recovery_elapsed_seconds": 6.64,
+  "latency": {
+    "corrupt_preview": {
+      "n": 1,
+      "p50_ms": 167.824,
+      "p95_ms": 167.824,
+      "max_ms": 167.824
+    },
+    "final_health": {
+      "n": 1,
+      "p50_ms": 1.57,
+      "p95_ms": 1.57,
+      "max_ms": 1.57
+    },
+    "health_during_slow_work": {
+      "n": 58,
+      "p50_ms": 1.662,
+      "p95_ms": 2.413,
+      "max_ms": 2.589
+    },
+    "preview": {
+      "n": 1,
+      "p50_ms": 161.418,
+      "p95_ms": 161.418,
+      "max_ms": 161.418
+    },
+    "task_poll": {
+      "n": 174,
+      "p50_ms": 2.107,
+      "p95_ms": 2.698,
+      "max_ms": 3.362
+    },
+    "upload": {
+      "n": 5,
+      "p50_ms": 27.562,
+      "p95_ms": 53.095,
+      "max_ms": 53.095
+    }
+  },
+  "passed": true
+}

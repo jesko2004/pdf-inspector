@@ -7,7 +7,6 @@ import logging
 import re
 from contextlib import asynccontextmanager
 from datetime import datetime
-from functools import partial
 from pathlib import Path
 from time import perf_counter
 from typing import Annotated
@@ -27,7 +26,11 @@ except ImportError as exc:
     ) from exc
 
 from .config import Settings
-from .source_preview import PreviewPageNotFoundError, PreviewUnavailableError, render_source_page
+from .process_isolation import (
+    ProcessingCancelledError, ProcessingCapacityError, ProcessingLimitsUnavailableError,
+    ProcessingResultTooLargeError, ProcessingTimeoutError, ProcessingWorkerError,
+    WorkerOperationError,
+)
 from .embeddings import EmbeddingError
 from .knowledge_models import (
     KnowledgeAskRequest,
@@ -57,8 +60,6 @@ from .observability import (
     SlidingWindowRateLimiter,
     json_log,
 )
-from .ocr import create_ocr_provider
-from .processor import process_document
 from .profile_store import (
     BuiltinProfileError,
     ProfileAlreadyExistsError,
@@ -99,12 +100,9 @@ def create_app(
     audit = AuditStore(settings.audit_database_path)
     authenticator = ApiKeyAuthenticator(settings.api_keys)
     rate_limiter = SlidingWindowRateLimiter()
-    configured_processor = processor or partial(
-        process_document, ocr_provider=create_ocr_provider(settings), metrics=metrics
-    )
     service = TaskService(
         settings,
-        processor=configured_processor,
+        processor=processor,
         start_workers=start_workers,
         metrics=metrics,
     )
@@ -811,6 +809,8 @@ def create_app(
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         except CapacityExceededError as exc:
             raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except ProcessingCancelledError as exc:
+            raise HTTPException(status_code=503, detail="task_service_shutting_down") from exc
 
     @app.get("/v1/tasks")
     def list_tasks(
@@ -852,13 +852,24 @@ def create_app(
         if not path.is_file():
             raise HTTPException(status_code=404, detail="source_not_found")
         try:
-            image = render_source_page(path, page)
-        except PreviewPageNotFoundError as exc:
-            raise HTTPException(status_code=404, detail="source_page_not_found") from exc
-        except PreviewUnavailableError as exc:
-            raise HTTPException(status_code=503, detail="source_preview_dependency_missing") from exc
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail="source_page_render_failed") from exc
+            image = service.render_preview(path, page)
+        except WorkerOperationError as exc:
+            code, status = {
+                "PreviewPageNotFoundError": ("source_page_not_found", 404),
+                "PreviewUnavailableError": ("source_preview_dependency_missing", 503),
+                "ValueError": ("source_page_render_failed", 422),
+                "ProcessingMemoryLimitError": ("source_preview_resource_limit", 503),
+                "ProcessingResultTooLargeError": ("source_preview_resource_limit", 503),
+            }.get(exc.code, ("source_preview_worker_failed", 503))
+            raise HTTPException(status_code=status, detail=code) from exc
+        except ProcessingCapacityError as exc:
+            raise HTTPException(status_code=429, detail="source_preview_capacity_exceeded",
+                                headers={"Retry-After": "1"}) from exc
+        except ProcessingTimeoutError as exc:
+            raise HTTPException(status_code=504, detail="source_preview_timeout") from exc
+        except (ProcessingCancelledError, ProcessingLimitsUnavailableError,
+                ProcessingResultTooLargeError, ProcessingWorkerError) as exc:
+            raise HTTPException(status_code=503, detail="source_preview_worker_unavailable") from exc
         return Response(image, media_type="image/png", headers={"Cache-Control": "no-store"})
 
     @app.get("/v1/tasks/{task_id}/result")
@@ -936,5 +947,10 @@ def create_app(
             raise HTTPException(status_code=404, detail="task_not_found") from exc
         except InvalidTaskStateError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except CapacityExceededError as exc:
+            raise HTTPException(status_code=429, detail=str(exc),
+                                headers={"Retry-After": "1"}) from exc
+        except ProcessingCancelledError as exc:
+            raise HTTPException(status_code=503, detail="task_service_shutting_down") from exc
 
     return app

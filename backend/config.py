@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -14,6 +15,13 @@ class Settings:
     builtin_profile_dir: Path
     max_upload_bytes: int = 50 * 1024 * 1024
     worker_count: int = 2
+    process_timeout_seconds: float = 300
+    process_memory_mb: int = 2048
+    process_max_result_bytes: int = 32 * 1024 * 1024
+    pdf_max_pages: int = 2000
+    preview_timeout_seconds: float = 15
+    preview_worker_count: int = 1
+    ocr_max_pixels: int = 20_000_000
     ocr_provider: str = "none"
     ocr_command: tuple[str, ...] | None = None
     ocr_timeout_seconds: int = 180
@@ -53,6 +61,22 @@ class Settings:
     rrf_rank_constant: int = 60
     bm25_k1: float = 1.2
     bm25_b: float = 0.75
+
+    def __post_init__(self) -> None:
+        for name in ("process_timeout_seconds", "preview_timeout_seconds"):
+            value = getattr(self, name)
+            if type(value) not in (int, float) or not math.isfinite(value) or not 0 < value <= 3600:
+                raise ValueError(f"{name} must be finite and between 0 (exclusive) and 3600")
+        for name, minimum, maximum in (
+            ("process_memory_mb", 64, 65536),
+            ("process_max_result_bytes", 1024, 256 * 1024 * 1024),
+            ("pdf_max_pages", 1, 100000),
+            ("preview_worker_count", 1, 16),
+            ("ocr_max_pixels", 10000, 100_000_000),
+        ):
+            value = getattr(self, name)
+            if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
+                raise ValueError(f"{name} must be an integer between {minimum} and {maximum}")
 
     @classmethod
     def from_env(cls) -> Settings:
@@ -311,6 +335,13 @@ class Settings:
             builtin_profile_dir=profile_dir,
             max_upload_bytes=max_upload_mb * 1024 * 1024,
             worker_count=workers,
+            process_timeout_seconds=float(os.environ.get("PDF_INSPECTOR_PROCESS_TIMEOUT_SECONDS", "300")),
+            process_memory_mb=int(os.environ.get("PDF_INSPECTOR_PROCESS_MEMORY_MB", "2048")),
+            process_max_result_bytes=int(os.environ.get("PDF_INSPECTOR_PROCESS_MAX_RESULT_BYTES", str(32 * 1024 * 1024))),
+            pdf_max_pages=int(os.environ.get("PDF_INSPECTOR_PDF_MAX_PAGES", "2000")),
+            preview_timeout_seconds=float(os.environ.get("PDF_INSPECTOR_PREVIEW_TIMEOUT_SECONDS", "15")),
+            preview_worker_count=int(os.environ.get("PDF_INSPECTOR_PREVIEW_WORKERS", "1")),
+            ocr_max_pixels=int(os.environ.get("PDF_INSPECTOR_OCR_MAX_PIXELS", "20000000")),
             ocr_provider=ocr_provider,
             ocr_command=ocr_command,
             ocr_timeout_seconds=ocr_timeout,
