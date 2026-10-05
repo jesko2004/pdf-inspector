@@ -116,7 +116,10 @@ class RapidOcrProvider:
             if self._engine is None:
                 try:
                     from rapidocr import RapidOCR
-                    self._engine = RapidOCR()
+                    self._engine = RapidOCR(params={
+                        "EngineConfig.onnxruntime.intra_op_num_threads": 1,
+                        "EngineConfig.onnxruntime.inter_op_num_threads": 1,
+                    })
                 except ImportError as exc:
                     raise OcrDependencyError(
                         "RapidOCR or its ONNX runtime is not installed; run "

@@ -173,6 +173,12 @@ class ProcessRunner:
                 request = Path(root) / "request.json"
                 result = Path(root) / "result"
                 request.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+                # Keep native pools from multiplying the service's worker
+                # parallelism or reserving many thread stacks under RLIMIT_AS.
+                worker_environment = os.environ.copy()
+                for name in ("OPENBLAS_NUM_THREADS", "OMP_NUM_THREADS", "MKL_NUM_THREADS",
+                             "NUMEXPR_NUM_THREADS", "VECLIB_MAXIMUM_THREADS"):
+                    worker_environment[name] = "1"
                 with self._lock:
                     if self._closed.is_set():
                         raise ProcessingCancelledError("worker runner is closed")
@@ -182,6 +188,7 @@ class ProcessRunner:
                         cwd=Path(__file__).resolve().parent.parent,
                         stdin=subprocess.PIPE, stdout=subprocess.DEVNULL,
                         stderr=subprocess.DEVNULL,
+                        env=worker_environment,
                         creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0,
                         start_new_session=os.name != "nt",
                     )

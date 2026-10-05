@@ -185,7 +185,9 @@ class NativeResourceIntegrationTests(unittest.TestCase):
             page = scanned.new_page(width=600, height=240)
             page.insert_image(page.rect, stream=image)
             content = scanned.tobytes()
-        with TemporaryDirectory() as root:
+        with TemporaryDirectory() as root, patch.dict(os.environ, {
+            "OPENBLAS_NUM_THREADS": "64", "OMP_NUM_THREADS": "64",
+        }):
             settings = Settings(data_dir=Path(root), builtin_profile_dir=PROFILES,
                                 ocr_provider="rapidocr", ocr_min_confidence=0.3)
             service = TaskService(settings, start_workers=False)
@@ -195,7 +197,7 @@ class NativeResourceIntegrationTests(unittest.TestCase):
                 completed = service.get_task(task["id"])
                 self.assertIn(completed["status"], {"ready", "needs_review"}, completed.get("error"))
                 result = service.get_result(task["id"])
-                self.assertEqual([1], result["ocr"]["completed_pages"])
+                self.assertEqual([1], result["ocr"]["completed_pages"], result["ocr"])
                 self.assertIn("123.45", result["markdown"])
             finally:
                 service.close()
