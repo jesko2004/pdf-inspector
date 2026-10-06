@@ -9,6 +9,7 @@ from pathlib import Path
 from time import perf_counter
 
 from .process_isolation import apply_posix_memory_limit
+from .resource_lifecycle import guard_parent_exit
 
 
 class WorkerMetrics:
@@ -32,6 +33,7 @@ class WorkerMetrics:
 
 
 def main() -> None:
+    guard_parent_exit()
     request, output = map(Path, sys.argv[1:3])
     memory_bytes, max_bytes = map(int, sys.argv[3:5])
     # Windows assignment is completed by the parent before this release byte.
@@ -48,6 +50,11 @@ def main() -> None:
                 raise ValueError("preview exceeds configured byte limit")
             output.with_name("preview.png").write_bytes(image)
             data = None
+        elif payload["operation"] == "rerank":
+            from .reranking import FlashRankReranker
+            ranker = FlashRankReranker(model=payload["model"], cache_dir=Path(payload["cache_dir"]),
+                                      max_length=payload["max_length"])
+            data = ranker.rerank(payload["query"], payload["candidates"], payload["top_n"])
         elif payload["operation"] == "process":
             from .config import Settings
             from .ocr import create_ocr_provider

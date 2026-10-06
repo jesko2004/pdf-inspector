@@ -319,6 +319,7 @@ class KnowledgeServiceTests(unittest.TestCase):
         def fail_delete(_chunk_ids):
             raise AssertionError("must not erase an in-flight query's vectors")
 
+        original_delete = self.vectors.delete_chunks
         self.vectors.delete_chunks = fail_delete
         resumed = self.service.ingest_task(
             knowledge_base["id"], "task-cleanup-new", "cleanup-key"
@@ -327,6 +328,7 @@ class KnowledgeServiceTests(unittest.TestCase):
         self.assertEqual([], self.store.pending_vector_deletions())
         self.service.run_pending(document["id"])
         self.assertEqual(3, self.vectors.count(document_id=document["id"]))
+        self.vectors.delete_chunks = original_delete
         self.service.delete_document(knowledge_base["id"], document["id"])
         self.assertEqual(0, self.vectors.count())
 

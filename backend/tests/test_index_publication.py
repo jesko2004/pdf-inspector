@@ -160,10 +160,16 @@ class IndexPublicationTests(unittest.TestCase):
         self.prepare("legacy", [helpers.chunk("legacy")])
         self.service.run_pending()
         with closing(sqlite3.connect(self.settings.knowledge_database_path)) as connection, connection:
+            connection.execute("DROP TABLE index_lifecycle_events")
+            connection.execute("DROP TABLE retrieval_leases")
+            connection.execute("DROP TABLE index_generation_state")
+            connection.execute("DROP TABLE index_generations")
+            connection.execute("DROP TABLE vector_deletions")
+            connection.execute("CREATE TABLE vector_deletions (chunk_id TEXT PRIMARY KEY, created_at TEXT NOT NULL)")
             connection.execute("DROP TABLE published_document_indexes")
             connection.execute("DROP TABLE published_knowledge_bases")
             connection.execute("ALTER TABLE knowledge_bases DROP COLUMN index_rebuild_pending")
-            connection.execute("DELETE FROM schema_migrations WHERE component = 'knowledge' AND version = 5")
+            connection.execute("DELETE FROM schema_migrations WHERE component = 'knowledge' AND version >= 5")
         for _ in range(2):
             self.service.store = KnowledgeStore(self.settings.knowledge_database_path)
             self.assert_only_task("legacy")

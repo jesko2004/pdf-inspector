@@ -48,7 +48,9 @@ def has_permission(principal: Principal, required: str) -> bool:
 def required_permission(method: str, path: str) -> str | None:
     if path in {"/health", "/docs", "/redoc", "/openapi.json", "/demo"}:
         return None
-    if path in {"/metrics", "/v1/audit-events"} or method == "DELETE":
+    if path in {"/metrics", "/v1/audit-events"} or path.startswith("/v1/maintenance/") or method == "DELETE":
+        return "admin"
+    if method == "POST" and path.endswith(("/index-generations/rollback", "/index-garbage-collection")):
         return "admin"
     if method in {"GET", "HEAD", "OPTIONS"}:
         return "read"

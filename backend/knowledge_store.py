@@ -11,7 +11,12 @@ from typing import Any, Iterator
 from uuid import uuid4
 
 from .migrations import Migration, apply_migrations
+from .maintenance import DELETION_RETRY_MIGRATION
 from .index_publication import INDEX_PUBLICATION_MIGRATION, initialize_publications, publish_ready, retrieval_snapshot
+from .index_lifecycle import (
+    INDEX_LIFECYCLE_MIGRATION, assert_mutation_allowed, capture_generation,
+    initialize_lifecycle, invalidate_document_generations, queue_deletions,
+)
 from .task_store import utc_now
 
 DOCUMENT_STATUSES = {"queued", "indexing", "ready", "partial", "failed"}
@@ -251,10 +256,13 @@ class KnowledgeStore:
                     EMBEDDING_CHECKPOINT_MIGRATION,
                     ANSWER_VALIDATION_MIGRATION,
                     INDEX_PUBLICATION_MIGRATION,
+                    INDEX_LIFECYCLE_MIGRATION,
+                    DELETION_RETRY_MIGRATION,
                 ),
             )
 
             initialize_publications(self, connection)
+            initialize_lifecycle(connection)
 
     def batch_status_counts(self) -> dict[str, int]:
         with self._connect() as connection:
@@ -294,6 +302,7 @@ class KnowledgeStore:
                         now,
                     ),
                 )
+                capture_generation(connection, knowledge_base_id, now)
         except sqlite3.IntegrityError as exc:
             raise KnowledgeConflictError(
                 f"knowledge base name already exists: {name}"
@@ -358,13 +367,17 @@ class KnowledgeStore:
             raise KnowledgeBaseNotFoundError(knowledge_base_id)
         return self.get_knowledge_base(knowledge_base_id)
 
-    def delete_knowledge_base(self, knowledge_base_id: str) -> None:
+    def delete_knowledge_base(self, knowledge_base_id: str, *, vector_ids=()) -> None:
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            if connection.execute("SELECT 1 FROM knowledge_documents WHERE knowledge_base_id = ? AND status IN ('queued', 'indexing') LIMIT 1", (knowledge_base_id,)).fetchone():
+                raise InvalidKnowledgeStateError("cannot delete a knowledge base while indexing is active")
+            queue_deletions(connection, knowledge_base_id, vector_ids)
             cursor = connection.execute(
                 "DELETE FROM knowledge_bases WHERE id = ?", (knowledge_base_id,)
             )
-        if cursor.rowcount != 1:
-            raise KnowledgeBaseNotFoundError(knowledge_base_id)
+            if cursor.rowcount != 1:
+                raise KnowledgeBaseNotFoundError(knowledge_base_id)
 
     def get_document(self, document_id: str) -> dict[str, Any]:
         with self._connect() as connection:
@@ -520,6 +533,8 @@ class KnowledgeStore:
         incoming = {_chunk_key(chunk): chunk for chunk in chunks}
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            assert_mutation_allowed(connection, knowledge_base_id)
+            knowledge_base = dict(connection.execute("SELECT * FROM knowledge_bases WHERE id = ?", (knowledge_base_id,)).fetchone())
             if connection.execute("SELECT index_rebuild_pending FROM knowledge_bases WHERE id = ?", (knowledge_base_id,)).fetchone()[0]:
                 raise InvalidKnowledgeStateError("cannot ingest while an index rebuild is awaiting publication")
             duplicate_row = connection.execute(
@@ -1166,6 +1181,11 @@ class KnowledgeStore:
         self.get_document(document_id)
         now = utc_now()
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            document = connection.execute("SELECT * FROM knowledge_documents WHERE id = ?", (document_id,)).fetchone()
+            if document is None:
+                raise KnowledgeDocumentNotFoundError(document_id)
+            assert_mutation_allowed(connection, document["knowledge_base_id"])
             rows = connection.execute(
                 "SELECT id, chunk_ids_json FROM embedding_batches "
                 "WHERE document_id = ? AND status = 'failed' ORDER BY created_at",
@@ -1308,14 +1328,21 @@ class KnowledgeStore:
                 connection.execute("UPDATE knowledge_bases SET index_rebuild_pending = 0 WHERE id = ?", (knowledge_base_id,))
                 kb = dict(connection.execute("SELECT * FROM knowledge_bases WHERE id = ?", (knowledge_base_id,)).fetchone())
                 connection.execute("INSERT INTO published_knowledge_bases VALUES (?, ?, ?) ON CONFLICT(knowledge_base_id) DO UPDATE SET config_json=excluded.config_json, published_at=excluded.published_at", (knowledge_base_id, json.dumps(kb), now))
+                capture_generation(connection, knowledge_base_id, now, reset_override=True)
             else:
                 publish_ready(self, connection, documents[0]["id"], now)
         return batch_map
 
-    def delete_document(self, document_id: str) -> None:
+    def delete_document(self, document_id: str, *, vector_ids=()) -> None:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
-            document = connection.execute("SELECT knowledge_base_id FROM knowledge_documents WHERE id = ?", (document_id,)).fetchone()
+            document = connection.execute("SELECT knowledge_base_id, status FROM knowledge_documents WHERE id = ?", (document_id,)).fetchone()
+            if document is None:
+                raise KnowledgeDocumentNotFoundError(document_id)
+            if document["status"] in {"queued", "indexing"}:
+                raise InvalidKnowledgeStateError("cannot delete a document while indexing is active")
+            queue_deletions(connection, document["knowledge_base_id"], vector_ids)
+            invalidate_document_generations(connection, document["knowledge_base_id"], document_id)
             cursor = connection.execute(
                 "DELETE FROM knowledge_documents WHERE id = ?", (document_id,)
             )
@@ -1332,6 +1359,8 @@ class KnowledgeStore:
                         now = utc_now()
                         connection.execute("UPDATE knowledge_bases SET index_rebuild_pending = 0 WHERE id = ?", (knowledge_base_id,))
                         connection.execute("INSERT INTO published_knowledge_bases VALUES (?, ?, ?) ON CONFLICT(knowledge_base_id) DO UPDATE SET config_json=excluded.config_json, published_at=excluded.published_at", (knowledge_base_id, json.dumps(config), now))
+                        capture_generation(connection, knowledge_base_id, now, reset_override=True)
+                capture_generation(connection, knowledge_base_id, utc_now())
         if cursor.rowcount != 1:
             raise KnowledgeDocumentNotFoundError(document_id)
 

@@ -7,9 +7,11 @@ import sys
 from pathlib import Path
 
 from backend.process_isolation import apply_posix_memory_limit
+from backend.resource_lifecycle import guard_parent_exit
 
 
 def main():
+    guard_parent_exit()
     request, output = map(Path, sys.argv[1:3])
     if sys.stdin.buffer.read(1) != b"1":
         return

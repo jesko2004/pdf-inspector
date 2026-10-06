@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 from backend.answer_validation import REFUSAL
 from backend.app import create_app
 from backend.config import Settings
-from backend.grounded_answer import validate_grounded_answer
+from backend.grounded_answer import GroundedAnswer, validate_grounded_answer
 from backend.knowledge_store import KnowledgeStore
 from backend.llm import LlmError, LlmResult, OpenAICompatibleLlmProvider
 from backend.rag_service import RagService
@@ -38,6 +38,59 @@ class Provider:
 
 
 class GroundedAnswerTests(unittest.TestCase):
+    def test_duplicate_claims_keep_first_evidence_and_audit_later_copies(self):
+        source = {"chunk_id": "chunk-1", "text": "Supply 24 V; frequency 50 Hz",
+                  "citation": {"chunk_id": "chunk-1", "filename": "manual.pdf", "pages": [1]}}
+        payload = json.loads(contract("Supply 24 V"))
+        duplicate = json.loads(contract("frequency 50 Hz"))["claims"][0]
+        payload["claims"].append(duplicate)
+        result = validate_grounded_answer(json.dumps(payload), [source])
+        self.assertEqual(1, len(result["claims"]))
+        self.assertEqual("Supply 24 V", result["claims"][0]["evidence"][0]["quote"])
+        self.assertEqual([duplicate], result["validation"]["duplicate_claims_omitted"])
+        self.assertEqual(1, result["answer"].count("Supported claim"))
+        payload["claims"][1]["evidence"][0]["quote"] = "invented"
+        with self.assertRaises(LlmError):
+            validate_grounded_answer(json.dumps(payload), [source])
+
+    def test_table_evidence_adds_exact_local_identity_and_intro(self):
+        body = ('Unit: GBP\n\nTable columns: Model, Price. Rows: '
+                'Model [column_1]=Alpha; Price [column_2]=190 | '
+                'Model [column_1]=Beta; Price [column_2]=210')
+        source = {"chunk_id": "chunk-1", "text": body,
+                  "citation": {"filename": "manual.pdf", "pages": [4]}}
+        result = validate_grounded_answer(contract("Price [column_2]=210"), [source])
+        quotes = [x["quote"] for x in result["claims"][0]["evidence"]]
+        self.assertEqual(["Price [column_2]=210", "Model [column_1]=Beta", "Unit: GBP"], quotes)
+        self.assertTrue(all(quote in body for quote in quotes))
+        self.assertEqual(2, result["validation"]["evidence_context_entries_added"])
+        self.assertEqual("model_asserted_not_independently_checked", result["validation"]["semantic_support"])
+        with self.assertRaises(LlmError):
+            validate_grounded_answer(contract("Price [column_2]=211"), [source])
+
+    def test_table_context_never_selects_ambiguous_or_cross_row_identity(self):
+        body = ('Unit: GBP\n\nTable columns: Model, Price. Rows: '
+                'Model [column_1]=Alpha; Price [column_2]=210 | '
+                'Model [column_1]=Beta; Price [column_2]=210')
+        source = {"chunk_id": "chunk-1", "text": body,
+                  "citation": {"filename": "manual.pdf", "pages": [4]}}
+        for quote in ["Price [column_2]=210", "Price [column_2]=210 | Model [column_1]=Beta"]:
+            result = validate_grounded_answer(contract(quote), [source])
+            self.assertEqual(1, len(result["claims"][0]["evidence"]))
+
+    def test_structured_provider_constrains_normal_and_stream_requests(self):
+        with TemporaryDirectory() as root:
+            settings = Settings(data_dir=Path(root), builtin_profile_dir=Path(root), llm_provider="openai_compatible",
+                                llm_base_url="http://localhost/v1", rag_answer_format="grounded_json")
+            service = RagService(settings, fixtures.FakeKnowledge([]))
+            provider = service._provider()
+            for stream in (False, True):
+                payload = json.loads(provider._request([], 100, stream=stream).data)
+                self.assertEqual(GroundedAnswer.model_json_schema(), payload["response_format"]["json_schema"]["schema"])
+                self.assertTrue(payload["response_format"]["json_schema"]["strict"])
+            service.settings = replace(settings, rag_answer_format="text")
+            self.assertNotIn("response_format", json.loads(service._provider()._request([], 100, stream=False).data))
+
     def service(self, root, text, items=None, **overrides):
         provider = Provider(text)
         settings = Settings(data_dir=Path(root), builtin_profile_dir=Path(root), llm_provider="openai_compatible", **overrides)

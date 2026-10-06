@@ -7,7 +7,7 @@ from urllib.parse import urlsplit
 
 from .config import Settings
 from .embeddings import EmbeddingError, create_embedding_provider
-from .grounded_answer import SYSTEM_PROMPT, validate_grounded_answer
+from .grounded_answer import GroundedAnswer, SYSTEM_PROMPT, validate_grounded_answer
 from .knowledge_service import KnowledgeService
 from .llm import LlmError, create_llm_provider
 
@@ -49,6 +49,7 @@ def check_models(settings: Settings, *, embedding=None, llm=None) -> dict:
         provider=settings.llm_provider, model=settings.llm_model,
         base_url=settings.llm_base_url, api_key=settings.llm_api_key,
         timeout_seconds=settings.llm_timeout_seconds,
+        response_schema=GroundedAnswer.model_json_schema(),
     )
     sources = [{"chunk_id": "probe-source", "text": "The controller supply voltage is 24 V.", "citation": {"chunk_id": "probe-source", "filename": "contract-probe.txt", "pages": [1]}}]
     messages = [

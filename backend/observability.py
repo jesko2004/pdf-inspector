@@ -73,7 +73,10 @@ class MetricsRegistry:
 
 
 class SlidingWindowRateLimiter:
-    def __init__(self) -> None:
+    def __init__(self, *, max_identities: int = 10000) -> None:
+        if max_identities < 1:
+            raise ValueError("max_identities must be positive")
+        self.max_identities = max_identities
         self._lock = Lock()
         self._events: dict[tuple[str, str], deque[float]] = defaultdict(deque)
 
@@ -83,6 +86,14 @@ class SlidingWindowRateLimiter:
         now = monotonic()
         key = (identity, bucket)
         with self._lock:
+            if key not in self._events:
+                # Expired identities can be reclaimed. Active entries are never
+                # evicted to make a new identity bypass an existing limit.
+                for existing, history in list(self._events.items()):
+                    if not history or history[-1] <= now - window:
+                        del self._events[existing]
+                if len(self._events) >= self.max_identities:
+                    return False, max(1, int(window))
             events = self._events[key]
             while events and events[0] <= now - window:
                 events.popleft()

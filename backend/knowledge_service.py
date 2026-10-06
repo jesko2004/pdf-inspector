@@ -23,12 +23,15 @@ from .knowledge_store import (
     KnowledgeDocumentNotFoundError,
     KnowledgeStore,
 )
+from .index_lifecycle import collect_garbage, drain_deletions, generation_summary, leased_retrieval, rollback_generation
 from .lexical_retrieval import bm25_search
-from .reranking import RerankerProvider, create_reranker
+from .reranking import IsolatedReranker, RerankerProvider, create_reranker
+from .process_isolation import ProcessingCapacityError, ProcessingTimeoutError
+from .maintenance import MaintenanceWorker, deletion_status, reset_deletions
 from .service import ResultNotReadyError, TaskService
 from .task_store import RESULT_STATUSES
 from .table_query import compile_filters, matching_rows, project_rows
-from .vector_store import VectorRecord, VectorSearchHit, VectorSearchQuery, VectorStore
+from .vector_store import SQLiteVectorStore, VectorRecord, VectorSearchHit, VectorSearchQuery, VectorStore
 
 EmbeddingFactory = Callable[[str, str, int], EmbeddingProvider]
 RerankerFactory = Callable[[Settings], RerankerProvider | None]
@@ -68,7 +71,7 @@ class KnowledgeService:
             )
         self.rerank_executor = (
             ThreadPoolExecutor(max_workers=1, thread_name_prefix="knowledge-rerank")
-            if self.reranker is not None
+            if self.reranker is not None and not isinstance(self.reranker, IsolatedReranker)
             else None
         )
         self.executor = ThreadPoolExecutor(
@@ -76,10 +79,12 @@ class KnowledgeService:
         )
         self._future_lock = Lock()
         self._futures = set()
+        self._maintenance = None
         if start_workers:
-            self._drain_vector_deletions()
+            self._drain_vector_deletions_best_effort()
             for batch_id in self.store.recover_incomplete():
                 self._submit(batch_id)
+            self._maintenance = MaintenanceWorker(self._drain_vector_deletions_best_effort)
 
     def _default_embedding_factory(
         self, provider: str, model: str, dimensions: int
@@ -220,7 +225,7 @@ class KnowledgeService:
             )
         )
         if removed_vector_ids or self.store.pending_vector_deletions(1):
-            self._drain_vector_deletions()
+            self._drain_vector_deletions(scheduled=True)
         if idempotent and document["status"] == "queued":
             batch_ids = [
                 batch["id"]
@@ -232,13 +237,46 @@ class KnowledgeService:
                 self._submit(batch_id)
         return {**document, "idempotent": idempotent}
 
-    def _drain_vector_deletions(self) -> None:
-        while True:
-            chunk_ids = self.store.pending_vector_deletions()
-            if not chunk_ids:
-                return
-            self.vector_store.delete_chunks(chunk_ids)
-            self.store.complete_vector_deletions(chunk_ids)
+    def _drain_vector_deletions(self, *, knowledge_base_id=None, scheduled=False) -> int:
+        def delete_locked(connection, chunk_ids):
+            if isinstance(self.vector_store, SQLiteVectorStore) and self.vector_store.database_path.resolve() == self.store.database_path.resolve():
+                self.vector_store.delete_chunks(chunk_ids, connection=connection)
+            else:
+                self.vector_store.delete_chunks(chunk_ids)
+        return drain_deletions(self.store, delete_locked, knowledge_base_id=knowledge_base_id, scheduled=scheduled)
+
+    def _drain_vector_deletions_best_effort(self) -> None:
+        try:
+            if self.store.pending_vector_deletions(limit=1):
+                self._drain_vector_deletions(scheduled=True)
+            if self.metrics is not None:
+                status = deletion_status(self.store)
+                self.metrics.set_gauge("pdf_inspector_vector_deletions_pending", status["pending"])
+                self.metrics.set_gauge("pdf_inspector_vector_deletions_blocked", status["blocked"])
+        except Exception as exc:
+            LOGGER.warning("vector deletion remains queued: %s", type(exc).__name__)
+
+    def list_index_generations(self, knowledge_base_id: str) -> dict:
+        return generation_summary(self.store, knowledge_base_id)
+
+    def collect_index_garbage(self, knowledge_base_id: str, *, keep_generations=2, dry_run=True, expected_generation_id=None) -> dict:
+        if type(keep_generations) is not int or not 1 <= keep_generations <= 100 or type(dry_run) is not bool:
+            raise ValueError("invalid garbage collection options")
+        if not dry_run and not expected_generation_id:
+            raise ValueError("expected_generation_id is required when applying garbage collection")
+        self.store.get_knowledge_base(knowledge_base_id)
+        result = collect_garbage(self.store, knowledge_base_id, self.vector_store.chunk_ids(knowledge_base_id),
+                                keep_generations=keep_generations, dry_run=dry_run, expected_generation_id=expected_generation_id)
+        if not dry_run:
+            result["deleted_vectors"] = self._drain_vector_deletions(knowledge_base_id=knowledge_base_id)
+        return result
+
+    def rollback_index(self, knowledge_base_id: str, *, generation_id: str, expected_generation_id: str, reason: str) -> dict:
+        if not reason.strip() or not generation_id or not expected_generation_id:
+            raise ValueError("generation IDs and a rollback reason are required")
+        self.store.get_knowledge_base(knowledge_base_id)
+        return rollback_generation(self.store, knowledge_base_id, generation_id, expected_generation_id, reason.strip(),
+                                   self.vector_store.chunk_ids(knowledge_base_id))
 
     def get_document(self, knowledge_base_id: str, document_id: str) -> dict:
         document = self.store.get_document(document_id)
@@ -252,8 +290,9 @@ class KnowledgeService:
             raise InvalidKnowledgeStateError(
                 "cannot delete a document while indexing is active"
             )
-        self.vector_store.delete_document(document_id)
-        self.store.delete_document(document_id)
+        vector_ids = self.vector_store.chunk_ids(knowledge_base_id, document_id=document_id)
+        self.store.delete_document(document_id, vector_ids=vector_ids)
+        self._drain_vector_deletions_best_effort()
 
     def delete_knowledge_base(self, knowledge_base_id: str) -> None:
         self.store.get_knowledge_base(knowledge_base_id)
@@ -261,8 +300,9 @@ class KnowledgeService:
             raise InvalidKnowledgeStateError(
                 "cannot delete a knowledge base while indexing is active"
             )
-        self.vector_store.delete_knowledge_base(knowledge_base_id)
-        self.store.delete_knowledge_base(knowledge_base_id)
+        vector_ids = self.vector_store.chunk_ids(knowledge_base_id)
+        self.store.delete_knowledge_base(knowledge_base_id, vector_ids=vector_ids)
+        self._drain_vector_deletions_best_effort()
 
     def retry_document(self, knowledge_base_id: str, document_id: str) -> dict:
         self.get_document(knowledge_base_id, document_id)
@@ -478,7 +518,7 @@ class KnowledgeService:
         }
         if not requested or not items:
             return items[:top_k], metadata
-        if self.reranker is None or self.rerank_executor is None:
+        if self.reranker is None:
             metadata["fallback_reason"] = (
                 "initialization_error"
                 if self.reranker_initialization_error
@@ -492,14 +532,14 @@ class KnowledgeService:
             return items[:final_limit], metadata
 
         started = perf_counter()
-        future = self.rerank_executor.submit(
-            self.reranker.rerank,
-            query,
-            items,
-            final_limit,
-        )
+        future = None
         try:
-            ranked = future.result(timeout=self.settings.rerank_timeout_ms / 1000)
+            if isinstance(self.reranker, IsolatedReranker):
+                ranked = self.reranker.rerank(query, items, final_limit)
+            else:
+                # Explicit injected providers are a trusted application/test path.
+                future = self.rerank_executor.submit(self.reranker.rerank, query, items, final_limit)
+                ranked = future.result(timeout=self.settings.rerank_timeout_ms / 1000)
             by_id = {item["chunk_id"]: item for item in items}
             reranked = []
             for rank, (chunk_id, score) in enumerate(ranked, start=1):
@@ -517,9 +557,12 @@ class KnowledgeService:
             if self.metrics is not None:
                 self.metrics.observe("rerank", metadata["latency_ms"] / 1000)
             return reranked, metadata
-        except FutureTimeoutError:
-            future.cancel()
+        except (FutureTimeoutError, ProcessingTimeoutError):
+            if future is not None:
+                future.cancel()
             fallback_reason = "timeout"
+        except ProcessingCapacityError:
+            fallback_reason = "capacity"
         except Exception as exc:  # noqa: BLE001 - reranking must fail open
             fallback_reason = "provider_error"
             LOGGER.warning(
@@ -535,6 +578,7 @@ class KnowledgeService:
             )
         return items[:final_limit], metadata
 
+    @leased_retrieval
     def search(
         self,
         knowledge_base_id: str,
@@ -556,6 +600,7 @@ class KnowledgeService:
         include_historical: bool = False,
         versions: list[str] | None = None,
         as_of: str | None = None,
+        _snapshot=None,
     ) -> dict[str, Any]:
         if retrieval_mode not in {"vector", "bm25", "hybrid"}:
             raise ValueError("retrieval_mode must be vector, bm25 or hybrid")
@@ -572,13 +617,7 @@ class KnowledgeService:
         candidate_limit = (
             max(top_k, self.settings.rerank_candidates) if rerank else top_k
         )
-        knowledge_base, documents_snapshot, snapshot = self.store.retrieval_snapshot(
-            knowledge_base_id,
-            document_ids=document_ids,
-            versions=versions or [],
-            as_of=as_of,
-            include_historical=include_historical,
-        )
+        knowledge_base, documents_snapshot, snapshot = _snapshot
         eligible_document_ids = list(documents_snapshot)
         chunks_snapshot = {chunk["id"]: chunk for chunk in snapshot}
         chunk_ids = tuple(chunks_snapshot)
@@ -716,6 +755,7 @@ class KnowledgeService:
         content = normalized(item["content"])
         return all(normalized(fragment) in content for fragment in expected.get("required_text", []))
 
+    @leased_retrieval
     def evaluate_retrieval(
         self,
         knowledge_base_id: str,
@@ -739,6 +779,7 @@ class KnowledgeService:
         include_historical: bool = False,
         versions: list[str] | None = None,
         as_of: str | None = None,
+        _snapshot=None,
     ) -> dict[str, Any]:
         if rewrite_query or compare_rewrite or rerank or compare_rerank or retrieval_mode != "vector" or rrf_k is not None or table_filters:
             advanced_rewrite = rewrite_query or compare_rewrite
@@ -806,13 +847,7 @@ class KnowledgeService:
                 }
             return advanced
         started = perf_counter()
-        knowledge_base, documents_snapshot, snapshot = self.store.retrieval_snapshot(
-            knowledge_base_id,
-            document_ids=document_ids,
-            versions=versions or [],
-            as_of=as_of,
-            include_historical=include_historical,
-        )
+        knowledge_base, documents_snapshot, snapshot = _snapshot
         document_ids = list(documents_snapshot)
         chunks_snapshot = {chunk["id"]: chunk for chunk in snapshot}
         provider = self.embedding_factory(
@@ -1005,6 +1040,10 @@ class KnowledgeService:
             self._run_batch(batch_id)
 
     def close(self) -> None:
+        if self._maintenance is not None:
+            self._maintenance.close()
+        if isinstance(self.reranker, IsolatedReranker):
+            self.reranker.close()
         self.executor.shutdown(wait=True, cancel_futures=False)
         if self.rerank_executor is not None:
             self.rerank_executor.shutdown(wait=True, cancel_futures=False)

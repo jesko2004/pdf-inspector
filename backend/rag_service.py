@@ -10,7 +10,7 @@ from uuid import uuid4
 
 from .config import Settings
 from .answer_validation import REFUSAL, validate_answer
-from .grounded_answer import SYSTEM_PROMPT, validate_grounded_answer
+from .grounded_answer import GroundedAnswer, SYSTEM_PROMPT, validate_grounded_answer
 from .knowledge_service import KnowledgeService
 from .llm import LlmProvider, create_llm_provider, estimate_tokens, truncate_to_tokens
 
@@ -50,6 +50,7 @@ class RagService:
             base_url=self.settings.llm_base_url,
             api_key=self.settings.llm_api_key,
             timeout_seconds=self.settings.llm_timeout_seconds,
+            response_schema=GroundedAnswer.model_json_schema() if self._structured() else None,
         )
 
     def _provider(self) -> LlmProvider:
@@ -123,6 +124,8 @@ class RagService:
         seen_parents = set()
         selection = []
         budget_exhausted = False
+        balanced = self._structured()
+        parent_ids = {item.get("parent_id") or item["chunk_id"] for item in search["items"]}
         for item in search["items"]:
             parent_id = item.get("parent_id") or item["chunk_id"]
             decision = {"chunk_id": item["chunk_id"], "parent_id": parent_id}
@@ -155,7 +158,13 @@ class RagService:
                 empty_content += 1
                 decision["reason"] = "empty_content"
                 continue
-            content = truncate_to_tokens(context_content, remaining)
+            # Preserve room for other retrieved parents in grounded answers.
+            # A verbose first table must not hide a later matching row or unit.
+            body_budget = remaining
+            if balanced:
+                parents_left = len(parent_ids - seen_parents) + 1
+                body_budget = max(1, remaining // parents_left)
+            content = truncate_to_tokens(context_content, body_budget)
             if not content:
                 budget_exhausted = True
                 budget_omitted += 1
@@ -163,7 +172,7 @@ class RagService:
                 continue
             if content != context_content:
                 body_truncated += 1
-                budget_exhausted = True
+                budget_exhausted = not balanced
                 decision["reason"] = "body_truncated"
             else:
                 decision["reason"] = "selected"
@@ -190,6 +199,17 @@ class RagService:
         if self._structured():
             system = SYSTEM_PROMPT
         user = f"Question:\n{question}\n\nSources:\n" + "\n\n".join(blocks)
+        if self._structured():
+            user += (
+                f"\n\nQuestion to answer:\n{question}\n"
+                "Use all relevant sources above, including explicit symbol definitions. "
+                "Return only the required JSON, with claim text in the question's language. "
+                "Include any explicitly stated unit or currency in the answer."
+                " Use ASCII double quotes for JSON keys and string delimiters; "
+                "typographic quotes may only occur inside a string. "
+                "Each claim must contain text and evidence; every chunk_id and quote "
+                "belongs inside that claim's evidence array. End after the JSON object."
+            )
         prompt_tokens = estimate_tokens(system) + estimate_tokens(user)
         citations = [item["citation"] for item in selected]
         return PreparedAnswer(
@@ -228,6 +248,7 @@ class RagService:
                 "estimated_total_with_output_reserve": prompt_tokens + output_budget,
                 "prompt_counting_scope": "message_content_only_no_chat_framing",
                 "model_window_verified": False,
+                "allocation_method": "balanced_parent_share" if balanced else "rank_order",
             },
             max_output_tokens=output_budget,
             refused=refused,

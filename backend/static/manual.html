@@ -30,6 +30,13 @@ const $ = id => document.getElementById(id);
 let lastAnswer = null, answerKb = null, sourceUrl = null, previewUrl = null;
 let sourceRequest = 0;
 const citationReviews = new Map();
+let uploadAttempt = null, askAttempt = null;
+function operationHeaders(kind, identity) {
+  let attempt = kind === 'upload' ? uploadAttempt : askAttempt;
+  if (!attempt || attempt.identity !== identity) attempt = {identity, key: crypto.randomUUID()};
+  if (kind === 'upload') uploadAttempt = attempt; else askAttempt = attempt;
+  return {'Idempotency-Key': attempt.key};
+}
 
 async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
@@ -161,12 +168,13 @@ $('upload').onclick = () => action($('upload'), async () => {
   if (!file) throw Error('请选择 PDF');
   if (!$('documentKey').value.trim()) throw Error('请填写文档标识');
   const form = new FormData(); form.append('file', file); form.append('profile_id', 'manual_query');
-  const task = await json('/v1/tasks', {method: 'POST', body: form});
+  const task = await json('/v1/tasks', {method: 'POST', body: form, headers: operationHeaders('upload', file)});
   $('progress').textContent = '解析任务 ' + task.id;
   await wait('/v1/tasks/' + task.id, ['ready', 'needs_review'], result => $('progress').textContent = '解析 ' + result.status + ' · ' + task.id);
   const source = await json(base + '/documents', {method: 'POST', body: JSON.stringify({task_id: task.id, document_key: $('documentKey').value, version: $('version').value})});
   await wait(base + '/documents/' + source.id, ['ready'], result => $('progress').textContent = '入库 ' + result.status + ' · ' + source.id);
   $('progress').textContent = '入库完成，可提问。';
+  uploadAttempt = null;
 });
 $('ask').onclick = () => action($('ask'), async () => {
   lastAnswer = null; citationReviews.clear();
@@ -175,7 +183,9 @@ $('ask').onclick = () => action($('ask'), async () => {
   $('answer').textContent = ''; $('trace').textContent = ''; $('comment').value = ''; $('correction').value = '';
   $('viewer').hidden = true; $('status').textContent = '正在查询…';
   answerKb = $('kb').value;
-  const result = await json(kbPath(answerKb) + '/ask', {method: 'POST', body: JSON.stringify({question: $('question').value, retrieval_mode: $('mode').value, rrf_k: Number($('rrf').value), top_k: 5})});
+  const body = JSON.stringify({question: $('question').value, retrieval_mode: $('mode').value, rrf_k: Number($('rrf').value), top_k: 5});
+  const result = await json(kbPath(answerKb) + '/ask', {method: 'POST', body, headers: operationHeaders('ask', answerKb + body)});
+  askAttempt = null;
   lastAnswer = result;
   $('answer').textContent = result.answer;
   $('status').textContent = result.refused ? '资料不足，已拒答' : result.status === 'needs_review' ? (result.validation?.answer_mode === 'evidence_preview' ? '证据摘录，需要原页核对' : '回答待复核') : '已核验原文摘录，请核对结论';

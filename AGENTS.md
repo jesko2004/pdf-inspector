@@ -62,6 +62,7 @@ src/
 - **Unit tests**: inline `#[cfg(test)] mod tests` in each module with synthetic data.
 - **Integration tests**: `tests/integration_tests.rs` with fixture PDFs in `tests/fixtures/`.
 - **Regression suite**: sibling repo `pdf-evals` with 179+ snapshot PDFs. Run `cargo build --release` then `bench.py test` in that repo before committing.
+  - **Approved public alternative (2026-10-06)**: when the designated repository cannot be obtained, the owner approved the complete 200-PDF OpenDataLoader corpus at `340f25d70f5b2dbc4bc1cc6b154769f74b1fc745`. Build baseline and candidate separately, then run `scripts/bench_public_pdf.py test` with explicit binary paths as documented in `docs/external-public-regression.md`. All 200 must finish without errors or missing predictions, Markdown and JSON snapshots (excluding processing time) must match, and all seven evaluator aggregate scores must not decrease. No automatic snapshot rebasing. Keep the original suite explicitly recorded as not obtained/not executed; this is adoption of an actually executed alternative, not a test waiver. The fmt, Clippy and Rust test gates remain mandatory.
 
 ## Debugging
 

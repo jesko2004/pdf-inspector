@@ -84,6 +84,19 @@ def attach_parent_context(
                 item["id"],
             ),
         )
+        # A table can span several parent batches. Keep its nearby introductory
+        # text (for example, a table-wide unit) available in each batch. Do not
+        # borrow introductions from another page or duplicate long prose.
+        introductions = {}
+        introduction = None
+        for item in ordered:
+            if item.get("kind", "text") == "text":
+                introduction = item if len(item["text"]) <= 1000 else None
+            elif item.get("kind") == "table" and introduction is not None:
+                if item["pages"] == introduction["pages"]:
+                    introductions[item["id"]] = introduction
+                else:
+                    introduction = None
         batches: list[list[dict]] = []
         current: list[dict] = []
         current_chars = 0
@@ -104,9 +117,16 @@ def attach_parent_context(
             batches.append(current)
 
         for batch_index, batch in enumerate(batches):
-            parent_markdown = "\n\n".join(item["markdown"] for item in batch)
-            parent_text = "\n\n".join(item["text"] for item in batch)
-            pages = sorted({page for item in batch for page in item["pages"]})
+            context_members = list(batch)
+            batch_ids = {item["id"] for item in batch}
+            for item in batch:
+                intro = introductions.get(item["id"])
+                if intro is not None and intro["id"] not in batch_ids:
+                    context_members.insert(0, intro)
+                    batch_ids.add(intro["id"])
+            parent_markdown = "\n\n".join(item["markdown"] for item in context_members)
+            parent_text = "\n\n".join(item["text"] for item in context_members)
+            pages = sorted({page for item in context_members for page in item["pages"]})
             identity = (
                 f"{document_id}:{'/'.join(section)}:{batch_index}:"
                 f"{hashlib.sha256(parent_markdown.encode()).hexdigest()}"

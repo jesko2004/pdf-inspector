@@ -116,6 +116,21 @@ class RagServiceTests(unittest.TestCase):
         self.assertEqual([], result["citations"])
         self.assertEqual([], provider.calls)
 
+    def test_grounded_budget_preserves_later_row_and_unit_sources(self):
+        with TemporaryDirectory() as temporary:
+            settings = replace(self.settings(temporary), llm_provider="openai_compatible",
+                               llm_model="local-instruct", rag_answer_format="grounded_json")
+            first = {**source_item("Verbose earlier equipment " * 500), "parent_id": "parent-1"}
+            later = {**source_item("Version Ultra costs 200 KRW."),
+                     "parent_id": "parent-2", "chunk_id": "price-source"}
+            prepared = self.prepare(RagService(settings, FakeKnowledge([first, later])))
+        self.assertEqual(["chunk-1", "price-source"], [s["chunk_id"] for s in prepared.sources])
+        self.assertEqual("Version Ultra costs 200 KRW.", prepared.sources[1]["text"])
+        self.assertLessEqual(prepared.context["estimated_tokens"], 128)
+        self.assertEqual(0, prepared.context["budget_omitted"])
+        self.assertEqual(1, prepared.context["body_truncated"])
+        self.assertEqual("balanced_parent_share", prepared.context["allocation_method"])
+
     def test_stream_emits_metadata_tokens_and_done(self):
         with TemporaryDirectory() as temporary:
             provider = RecordingProvider()
