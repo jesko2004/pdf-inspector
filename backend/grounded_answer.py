@@ -45,10 +45,38 @@ SYSTEM_PROMPT = (
     '"evidence": [{"chunk_id": string, "quote": string}]}]}. '
     'If the sources do not answer this specific question, return {"answerable":false,"claims":[]}. '
     "Otherwise supply 1-20 concise claims, each with 1-8 supporting evidence entries. "
+    "Answer the specific question only; usually one claim is enough. Do not list unrelated "
+    "rows, equipment, or properties. Include units, currencies and conditions when explicitly "
+    "provided by the sources. Do not infer missing conditions from other properties. "
+    "For table answers, match the requested row or version and quote its identity together "
+    "with the value, or add a separate quote for the row label. Quotes must cover "
+    "the requested row identity as well as its value. Units or currencies may need "
+    "another evidence quote. "
+    "For a price, inspect the document or table header for its currency, include that "
+    "currency in the claim, and add a verbatim header quote if it is separate from the row. "
     "Use only supplied chunk_id values. Copy each quote verbatim from the decoded source body, "
     "including punctuation and whitespace. Quotes must support the claim, not merely share keywords. "
     "Do not put filename/page citation syntax in claim text; the server adds citations. "
-    "Use the question's primary language for claim text."
+    "Write claim text in the question's primary language, translating source labels as needed; "
+    "do not copy English table notation as the answer to a Chinese question. Keep quotes verbatim. "
+    "A heading or document header can directly answer a date or unit question. "
+    "Combine a matching table row with its applicable header when a fact spans sources. "
+    "Examples below illustrate the contract only; never reuse their values or source IDs. "
+    'Example price sources: A="Classification=Basic; Price after rebate=350"; '
+    'B="Unit: EUR". For "What is the Basic price after rebate?", output '
+    '{"answerable":true,"claims":[{"text":"The Basic price after rebate is 350 EUR.",'
+    '"evidence":[{"chunk_id":"A","quote":"Classification=Basic"},'
+    '{"chunk_id":"A","quote":"Price after rebate=350"},'
+    '{"chunk_id":"B","quote":"Unit: EUR"}]}]}. '
+    'Example date source: C="Release Date: January 11, 2030". For "What is the release date?", output '
+    '{"answerable":true,"claims":[{"text":"The release date is January 11, 2030.",'
+    '"evidence":[{"chunk_id":"C","quote":"Release Date: January 11, 2030"}]}]}.'
+    ' Example unit source: D="Unit: mm". For "这份尺寸表用的是什么单位？", output '
+    '{"answerable":true,"claims":[{"text":"这份尺寸表使用毫米（mm）。",'
+    '"evidence":[{"chunk_id":"D","quote":"Unit: mm"}]}]}.'
+    ' For the same source and the Chinese question "资料注明的发布日期是哪一天？", output '
+    '{"answerable":true,"claims":[{"text":"资料注明的发布日期为 2030 年 1 月 11 日。",'
+    '"evidence":[{"chunk_id":"C","quote":"Release Date: January 11, 2030"}]}]}.'
 )
 
 
@@ -77,6 +105,35 @@ def _refusal_result() -> dict:
     }
 
 
+def _table_quote_context(body: str, quote: str) -> list[str]:
+    """Expose exact local row/header context, without inferring claim support.
+
+    Repeated or cross-row excerpts are ambiguous and are left unchanged.
+    """
+    if body.count(quote) != 1:
+        return []
+    position = body.index(quote)
+    table = body.rfind("Table columns: ", 0, position + 1)
+    if table < 0:
+        return []
+    rows = list(re.finditer(
+        r"(?:Rows: | \| )([^;|\n]+\[column_1\]=[^;|\n]+);", body[table:]
+    ))
+    matching = [i for i, row in enumerate(rows) if table + row.start(1) <= position]
+    if not matching:
+        return []
+    index = matching[-1]
+    row = rows[index]
+    end = table + rows[index + 1].start(1) if index + 1 < len(rows) else len(body)
+    if position + len(quote) > end:
+        return []
+    context = [row.group(1)] if len(row.group(1)) <= 1000 else []
+    prefix = body[:table].rstrip().rsplit("\n\n", 1)[-1]
+    if prefix and len(prefix) <= 1000 and "Table columns:" not in prefix and "Rows:" not in prefix:
+        context.append(prefix)
+    return context
+
+
 def validate_grounded_answer(text: str, sources: list[dict]) -> dict:
     # Canonical refusal remains compatible with existing model integrations.
     if text.strip() == REFUSAL:
@@ -95,6 +152,10 @@ def validate_grounded_answer(text: str, sources: list[dict]) -> dict:
     allowed = {source["chunk_id"]: source for source in sources}
     used = {}
     rendered = []
+    enriched = 0
+    unique_claims = []
+    duplicate_claims = []
+    seen_claims = set()
     for claim in answer.claims:
         if not claim.text.strip() or re.search(r"\[[^\]\n]*\bpp?\.\s*\d", claim.text):
             raise LlmError("LLM claim contains empty text or model-generated citation syntax")
@@ -107,19 +168,42 @@ def validate_grounded_answer(text: str, sources: list[dict]) -> dict:
                 or evidence.quote not in source["text"]
             ):
                 raise LlmError("LLM evidence is absent from the supplied context")
-            citation = source["citation"]
+        # Keep the first exact statement and retain subsequent copies for audit.
+        # All copies must still pass contract and quote validation above.
+        identity = claim.text.strip()
+        if identity in seen_claims:
+            duplicate_claims.append(claim.model_dump())
+            continue
+        seen_claims.add(identity)
+        unique_claims.append(claim)
+        for evidence in claim.evidence:
+            citation = allowed[evidence.chunk_id]["citation"]
             used[evidence.chunk_id] = citation
             references[evidence.chunk_id] = " ".join(
                 f'[{citation["filename"]} p.{page}]' for page in citation["pages"]
             )
+        # Validate every model-supplied entry first. Context never repairs an
+        # invented excerpt, unknown source or malformed contract.
+        additions = []
+        for evidence in claim.evidence:
+            for quote in _table_quote_context(allowed[evidence.chunk_id]["text"], evidence.quote):
+                if any(item.chunk_id == evidence.chunk_id and quote in item.quote
+                       for item in claim.evidence + additions):
+                    continue
+                if len(claim.evidence) + len(additions) < 8:
+                    additions.append(Evidence(chunk_id=evidence.chunk_id, quote=quote))
+        claim.evidence.extend(additions)
+        enriched += len(additions)
         rendered.append(claim.text.strip() + " " + " ".join(references.values()))
     return {
         "answer": "\n\n".join(rendered),
-        "claims": [claim.model_dump() for claim in answer.claims],
+        "claims": [claim.model_dump() for claim in unique_claims],
         "citations": list(used.values()),
         "validation": {
             "refused": False, "status": "completed", "answer_mode": "grounded_json",
             "citation_identity": "valid", "evidence_quotes": "exact_match",
             "semantic_support": "model_asserted_not_independently_checked",
+            "evidence_context_entries_added": enriched,
+            "duplicate_claims_omitted": duplicate_claims,
         },
     }

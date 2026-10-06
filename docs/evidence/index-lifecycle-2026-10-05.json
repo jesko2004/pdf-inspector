@@ -1,0 +1,42 @@
+{
+  "date": "2026-10-05",
+  "stage": "R07",
+  "status": "local changes verified; not committed or released",
+  "base_commit": "13cf480813f7a77a9adbe723c15ac246a023a9be",
+  "backend": {
+    "total": 223,
+    "passed": 221,
+    "skipped": 2,
+    "skip_reason": "both real pgvector tests lack configured DSN",
+    "log_sha256": "c2a60af0f786599cec351b086d7345ddd546c733c295ff2ea66d344e396e95b8"
+  },
+  "new_tests": {
+    "executed_passed": 18,
+    "real_pgvector_added_unexecuted": 1
+  },
+  "rust": {
+    "fmt_check": "passed",
+    "clippy_D_warnings": "passed",
+    "tests_passed": 893,
+    "release": "passed"
+  },
+  "manual_ui": "passed",
+  "external_pdf_evals": "not run; prescribed sibling repository unavailable",
+  "linux_ci_this_stage": "not run",
+  "real_models_and_user_quality": "not evaluated",
+  "source_fingerprints": {
+    "backend\\index_lifecycle.py": "9b1ea78dec22348e687e212dfd9f854f57a57ea57cbc9aefaea44a9a0b5aae1d",
+    "backend\\index_publication.py": "9ed6113a74fe339dad5bc899309763d1d7924cd714f52378ac959dfda2cfebf2",
+    "backend\\knowledge_store.py": "53b7ada5a12c375cba09350b67c747a354b81829835a4d73308d1c846eb8bf96",
+    "backend\\knowledge_service.py": "6d3be4c1a64122d438710edac0274bca298b2da3b034ca78482137297eabee57",
+    "backend\\vector_store.py": "c40edc21aba886369488bda7a8e0a636fc0272a88a715bfce69549ce44e0bc4a",
+    "backend\\knowledge_models.py": "a6b3d740e6f09848dd3e2f62c41e17a32c8e4f6bee91ff2f1421ec2a7f04c51a",
+    "backend\\security.py": "c6cdf48048a1a352b7354e1794abafbc711917d61c40d14023518d5a6f2bc339",
+    "backend\\app.py": "56b76a226f1ba4d1148d8f9aaa9aec2e86dfee26ea20eb26540d60ac24f24ce5",
+    "backend\\tests\\test_index_lifecycle.py": "8527fce314502ecefd73a58df870afcd557f199902febb5972cf32d7912114dd",
+    "backend\\tests\\test_index_lifecycle_api.py": "44cca372cf7b39608a3f8f74b7907a936cfae31070fface84c92c9287205bf1c",
+    "backend\\tests\\test_pgvector_integration.py": "f54d99ed5b11c49ed3418d29012d408f4cfde26a82cc6b943c37da059edbcdcb",
+    "backend/tests/test_index_publication.py": "e9be9baed0bb3ae0643d243036c485eab4c39e53c91c0dbc812fd2ba17545d75",
+    "backend/tests/test_knowledge_service.py": "ba7553dffe538848a4b02cbdf71db0fb49ba22b96d2eeedd61f0de6571d95068"
+  }
+}

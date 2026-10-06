@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import hashlib
 import logging
 import re
 from contextlib import asynccontextmanager
@@ -33,6 +34,8 @@ from .process_isolation import (
 )
 from .embeddings import EmbeddingError
 from .knowledge_models import (
+    IndexGarbageCollectionRequest,
+    IndexRollbackRequest,
     KnowledgeAskRequest,
     KnowledgeBaseCreate,
     KnowledgeBaseReindex,
@@ -44,6 +47,7 @@ from .knowledge_models import (
     normalize_aware_datetime,
 )
 from .knowledge_service import EmbeddingFactory, KnowledgeService, RerankerFactory
+from .index_lifecycle import IndexGenerationNotFoundError
 from .knowledge_store import (
     InvalidKnowledgeStateError,
     KnowledgeAnswerNotFoundError,
@@ -65,6 +69,8 @@ from .profile_store import (
     ProfileAlreadyExistsError,
     ProfileNotFoundError,
 )
+from .operations import OperationStore, OperationConflictError, fingerprint as operation_fingerprint
+from .maintenance import deletion_status, reset_deletions
 from .profiles import Profile
 from .rag_service import LlmFactory, RagService
 from .security import (
@@ -97,7 +103,6 @@ def create_app(
 ) -> FastAPI:
     settings = settings or Settings.from_env()
     metrics = MetricsRegistry()
-    audit = AuditStore(settings.audit_database_path)
     authenticator = ApiKeyAuthenticator(settings.api_keys)
     rate_limiter = SlidingWindowRateLimiter()
     service = TaskService(
@@ -106,23 +111,38 @@ def create_app(
         start_workers=start_workers,
         metrics=metrics,
     )
-    knowledge = KnowledgeService(
-        settings,
-        service,
-        KnowledgeStore(settings.knowledge_database_path),
-        vector_store or create_vector_store(settings),
-        embedding_factory=embedding_factory,
-        reranker_factory=reranker_factory,
-        start_workers=start_workers,
-        metrics=metrics,
-    )
-    rag = RagService(settings, knowledge, llm_factory=llm_factory)
+    knowledge = None
+    try:
+        audit = AuditStore(settings.audit_database_path)
+        operations = OperationStore(settings.database_path, recover_incomplete=start_workers)
+        knowledge = KnowledgeService(
+            settings,
+            service,
+            KnowledgeStore(settings.knowledge_database_path),
+            vector_store or create_vector_store(settings),
+            embedding_factory=embedding_factory,
+            reranker_factory=reranker_factory,
+            start_workers=start_workers,
+            metrics=metrics,
+        )
+        rag = RagService(settings, knowledge, llm_factory=llm_factory)
+    except BaseException:
+        try:
+            if knowledge is not None:
+                knowledge.close()
+        finally:
+            service.close()
+        raise
 
     @asynccontextmanager
     async def lifespan(_: FastAPI):
-        yield
-        knowledge.close()
-        service.close()
+        try:
+            yield
+        finally:
+            try:
+                knowledge.close()
+            finally:
+                service.close()
 
     app = FastAPI(
         title="PDF Inspector Task API",
@@ -135,6 +155,37 @@ def create_app(
     app.state.rag = rag
     app.state.metrics = metrics
     app.state.audit = audit
+    app.state.operations = operations
+
+    @app.get("/v1/maintenance/vector-deletions")
+    def get_deletion_status():
+        return deletion_status(knowledge.store)
+
+    @app.post("/v1/maintenance/vector-deletions/retry")
+    def retry_deletions():
+        reset_deletions(knowledge.store)
+        knowledge._drain_vector_deletions_best_effort()
+        return deletion_status(knowledge.store)
+
+    @app.exception_handler(OperationConflictError)
+    async def operation_conflict(request, exc):
+        return JSONResponse({"detail": {"code": exc.code, "operation_id": exc.operation_id}}, status_code=409)
+
+    @app.get("/v1/operations/{operation_id}")
+    def get_operation(operation_id: str, request: Request):
+        try:
+            return operations.get(operation_id, request.state.principal.key_id)
+        except KeyError as exc:
+            raise HTTPException(404, detail="operation_not_found") from exc
+
+    def execute_operation(request, scope, identity, callback, *, recover=None):
+        key = request.headers["idempotency-key"]
+        try:
+            return operations.execute(request.state.principal.key_id, scope, key, operation_fingerprint(identity), callback, recover=recover)
+        except OperationConflictError:
+            raise
+        except ValueError as exc:
+            raise HTTPException(422, detail=str(exc)) from exc
 
     @app.middleware("http")
     async def production_controls(request: Request, call_next):
@@ -402,7 +453,27 @@ def create_app(
             raise HTTPException(status_code=502, detail=str(exc)) from exc
 
     @app.post("/v1/knowledge-bases/{knowledge_base_id}/ask")
-    def ask_knowledge_base(knowledge_base_id: str, payload: KnowledgeAskRequest):
+    def ask_knowledge_base(knowledge_base_id: str, payload: KnowledgeAskRequest, request: Request):
+        if request.headers.get("idempotency-key") is None:
+            return _ask_once(knowledge_base_id, payload)
+        config = {name: getattr(settings, name) for name in (
+            "llm_provider", "llm_model", "llm_base_url", "embedding_provider", "embedding_model",
+            "embedding_dimensions", "embedding_base_url", "rag_max_context_tokens", "rag_max_output_tokens")}
+        answer, operation_id, replayed = execute_operation(request, "ask:" + knowledge_base_id,
+            {"request": payload.model_dump(mode="json"), "config": config},
+            lambda _: _ask_once(knowledge_base_id, payload.model_copy(update={"stream": False})))
+        headers = {"X-Operation-ID": operation_id, "Idempotency-Replayed": str(replayed).lower()}
+        if payload.stream:
+            # Checkpoint the complete answer before emitting it. Replaying a lost
+            # stream never starts a second provider call.
+            def saved_events():
+                for name, data in (("metadata", {"answer_id": answer["answer_id"], "citations": answer["citations"]}),
+                                   ("token", {"text": answer["answer"]}), ("done", answer)):
+                    yield f"event: {name}\ndata: {json.dumps(data, ensure_ascii=False)}\n\n"
+            return StreamingResponse(saved_events(), media_type="text/event-stream", headers=headers)
+        return JSONResponse(answer, headers=headers)
+
+    def _ask_once(knowledge_base_id: str, payload: KnowledgeAskRequest):
         try:
             if (
                 payload.max_context_tokens is not None
@@ -765,6 +836,39 @@ def create_app(
         except (ValueError, EmbeddingError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    @app.get("/v1/knowledge-bases/{knowledge_base_id}/index-generations")
+    def list_index_generations(knowledge_base_id: str) -> dict:
+        try:
+            return knowledge.list_index_generations(knowledge_base_id)
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="knowledge_base_not_found") from exc
+
+    @app.post("/v1/knowledge-bases/{knowledge_base_id}/index-generations/rollback")
+    def rollback_index(knowledge_base_id: str, payload: IndexRollbackRequest) -> dict:
+        try:
+            return knowledge.rollback_index(knowledge_base_id, **payload.model_dump())
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="knowledge_base_not_found") from exc
+        except IndexGenerationNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="index_generation_not_found") from exc
+        except InvalidKnowledgeStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            logging.getLogger(__name__).error("index rollback failed: %s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="index_rollback_unavailable") from exc
+
+    @app.post("/v1/knowledge-bases/{knowledge_base_id}/index-garbage-collection")
+    def collect_index_garbage(knowledge_base_id: str, payload: IndexGarbageCollectionRequest) -> dict:
+        try:
+            return knowledge.collect_index_garbage(knowledge_base_id, **payload.model_dump())
+        except KnowledgeBaseNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="knowledge_base_not_found") from exc
+        except InvalidKnowledgeStateError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except Exception as exc:
+            logging.getLogger(__name__).error("index garbage collection failed: %s", type(exc).__name__)
+            raise HTTPException(status_code=503, detail="index_garbage_collection_unavailable") from exc
+
     @app.get("/v1/profiles/{profile_id}")
     def get_profile(profile_id: str) -> dict:
         for profile in service.profiles.list():
@@ -796,12 +900,38 @@ def create_app(
 
     @app.post("/v1/tasks", status_code=202)
     def create_task(
+        request: Request,
         file: Annotated[UploadFile, File(description="PDF file")],
         profile_id: Annotated[str, Form()] = "purchase_quote",
-    ) -> dict:
+    ):
+        if request.headers.get("idempotency-key") is None:
+            return _upload_once(file, profile_id)
+        try:
+            profile = service.profiles.get(profile_id)
+        except ProfileNotFoundError as exc:
+            raise HTTPException(404, detail="profile_not_found") from exc
+        digest, size = hashlib.sha256(), 0
+        for block in iter(lambda: file.file.read(1024 * 1024), b""):
+            size += len(block)
+            if size > settings.max_upload_bytes:
+                raise HTTPException(422, detail="upload exceeds maximum size")
+            digest.update(block)
+        file.file.seek(0)
+        def recover(operation_id):
+            try:
+                return service.get_task(operation_id)
+            except TaskNotFoundError:
+                return None
+        result, operation_id, replayed = execute_operation(request, "upload",
+            {"sha256": digest.hexdigest(), "filename": Path(file.filename or "document.pdf").name,
+             "profile": profile.model_dump(mode="json")},
+            lambda task_id: _upload_once(file, profile_id, task_id=task_id), recover=recover)
+        return JSONResponse(result, status_code=202, headers={"X-Operation-ID": operation_id, "Idempotency-Replayed": str(replayed).lower()})
+
+    def _upload_once(file, profile_id, *, task_id=None) -> dict:
         try:
             return service.create_task(
-                file.filename or "document.pdf", file.file, profile_id
+                file.filename or "document.pdf", file.file, profile_id, task_id=task_id
             )
         except ProfileNotFoundError as exc:
             raise HTTPException(status_code=404, detail="profile_not_found") from exc

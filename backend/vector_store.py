@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterator, Protocol
@@ -76,6 +76,8 @@ class VectorStore(Protocol):
     def delete_knowledge_base(self, knowledge_base_id: str) -> None: ...
 
     def count(self, *, document_id: str | None = None) -> int: ...
+
+    def chunk_ids(self, knowledge_base_id: str, *, document_id: str | None = None) -> list[str]: ...
 
     def search(self, query: VectorSearchQuery) -> list[VectorSearchHit]: ...
 
@@ -184,15 +186,24 @@ class SQLiteVectorStore:
                 rows,
             )
 
-    def delete_chunks(self, chunk_ids: list[str]) -> None:
+    def delete_chunks(self, chunk_ids: list[str], *, connection=None) -> None:
         if not chunk_ids:
             return
         placeholders = ",".join("?" for _ in chunk_ids)
-        with self._connect() as connection:
-            connection.execute(
+        with (self._connect() if connection is None else nullcontext(connection)) as active:
+            active.execute(
                 f"DELETE FROM knowledge_vectors WHERE chunk_id IN ({placeholders})",
                 chunk_ids,
             )
+
+    def chunk_ids(self, knowledge_base_id: str, *, document_id: str | None = None) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT chunk_id FROM knowledge_vectors WHERE knowledge_base_id = ?" +
+                (" AND document_id = ?" if document_id is not None else "") + " ORDER BY chunk_id",
+                (knowledge_base_id, document_id) if document_id is not None else (knowledge_base_id,),
+            ).fetchall()
+        return [row[0] for row in rows]
 
     def delete_document(self, document_id: str) -> None:
         with self._connect() as connection:
@@ -434,6 +445,15 @@ class PgVectorStore:
                 "DELETE FROM pdf_inspector_vectors WHERE chunk_id = ANY(%s)",
                 (chunk_ids,),
             )
+
+    def chunk_ids(self, knowledge_base_id: str, *, document_id: str | None = None) -> list[str]:
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT chunk_id FROM pdf_inspector_vectors WHERE knowledge_base_id = %s" +
+                (" AND document_id = %s" if document_id is not None else "") + " ORDER BY chunk_id",
+                (knowledge_base_id, document_id) if document_id is not None else (knowledge_base_id,),
+            ).fetchall()
+        return [row[0] for row in rows]
 
     def delete_document(self, document_id: str) -> None:
         with self._connect() as connection:

@@ -1,8 +1,10 @@
 """Durable publication pointers and immutable retrieval snapshots."""
 
 import json
+from contextlib import nullcontext
 
 from .migrations import Migration
+from .index_lifecycle import capture_generation, publication_frozen
 
 
 INDEX_PUBLICATION_MIGRATION = Migration(
@@ -39,7 +41,7 @@ def initialize_publications(store, connection):
     for row in documents:
         # Reindexing can leave individual staging documents ready at restart.
         pending = connection.execute("SELECT index_rebuild_pending FROM knowledge_bases WHERE id = ?", (row["knowledge_base_id"],)).fetchone()
-        if not pending[0]:
+        if not pending[0] and not publication_frozen(connection, row["knowledge_base_id"]):
             _save_document(store, connection, row, row["updated_at"])
 
 
@@ -63,6 +65,8 @@ def publish_ready(store, connection, document_id, now):
     if row is None or row["status"] != "ready":
         return
     kb = connection.execute("SELECT * FROM knowledge_bases WHERE id = ?", (row["knowledge_base_id"],)).fetchone()
+    if publication_frozen(connection, kb["id"]) and not kb["index_rebuild_pending"]:
+        return
     connection.execute("INSERT OR IGNORE INTO published_knowledge_bases VALUES (?, ?, ?)",
                        (kb["id"], json.dumps(dict(kb)), now))
     if kb["index_rebuild_pending"]:
@@ -82,6 +86,7 @@ def publish_ready(store, connection, document_id, now):
             "ON CONFLICT(knowledge_base_id) DO UPDATE SET config_json = excluded.config_json, published_at = excluded.published_at",
             (kb["id"], json.dumps(config), now),
         )
+        capture_generation(connection, kb["id"], now, reset_override=True)
         return
     # A versioned replacement retires the prior published document in this same
     # transaction. Preparing or failing a new document leaves its pointer intact.
@@ -101,14 +106,16 @@ def publish_ready(store, connection, document_id, now):
         connection.execute("UPDATE knowledge_documents SET is_current = 0, effective_to = ? WHERE id = ?",
                            (document["effective_to"], old["document_id"]))
     _save_document(store, connection, row, now)
+    capture_generation(connection, kb["id"], now)
 
 
-def retrieval_snapshot(store, knowledge_base_id, *, document_ids, versions, as_of, include_historical):
+def retrieval_snapshot(store, knowledge_base_id, *, document_ids, versions, as_of, include_historical, _connection=None):
     from .knowledge_store import KnowledgeBaseNotFoundError
     from .task_store import utc_now
 
-    with store._connect() as connection:
-        connection.execute("BEGIN")
+    with (store._connect() if _connection is None else nullcontext(_connection)) as connection:
+        if _connection is None:
+            connection.execute("BEGIN")
         current = connection.execute("SELECT * FROM knowledge_bases WHERE id = ?", (knowledge_base_id,)).fetchone()
         if current is None:
             raise KnowledgeBaseNotFoundError(knowledge_base_id)

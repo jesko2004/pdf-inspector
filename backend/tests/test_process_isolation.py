@@ -30,11 +30,13 @@ FIXTURE_COMMAND = (sys.executable, "-m", "backend.tests.isolation_fixture")
 
 def wait_for_file(path, timeout=5):
     deadline = time.monotonic() + timeout
-    while not path.is_file() and time.monotonic() < deadline:
+    while time.monotonic() < deadline:
+        try:
+            return int(path.read_text(encoding="ascii"))
+        except (FileNotFoundError, ValueError):
+            pass
         time.sleep(0.01)
-    if not path.is_file():
-        raise AssertionError(f"worker never created {path.name}")
-    return int(path.read_text(encoding="ascii"))
+    raise AssertionError(f"worker never published a valid PID in {path.name}")
 
 
 def process_running(pid):

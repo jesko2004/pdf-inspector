@@ -41,6 +41,22 @@ class TaskService:
         if settings.ocr_provider == "command" and not settings.ocr_command:
             raise ValueError("PDF_INSPECTOR_OCR_COMMAND_JSON is required for command OCR")
         settings.create_directories()
+        self._execution_lock = (
+            SingleExecutorLock(settings.data_dir / "executor.lock") if start_workers else None
+        )
+        try:
+            self._initialize_services(settings, processor, start_workers, metrics)
+        except BaseException:
+            if self._execution_lock is not None:
+                self._execution_lock.close()
+            raise
+
+    def _initialize_services(self, settings, processor, start_workers, metrics):
+        if self._execution_lock is not None:
+            from .resource_lifecycle import cleanup_owned_files
+            cleaned = cleanup_owned_files(settings.data_dir)
+            if metrics is not None:
+                metrics.increment("pdf_inspector_stale_files_cleaned_total", cleaned)
         self.settings = settings
         self.profiles = ProfileStore(
             settings.builtin_profile_dir, settings.custom_profile_dir
@@ -68,26 +84,25 @@ class TaskService:
         self._futures = set()
         self._admission_lock = Lock()
         self._closing = False
-        self._execution_lock = (
-            SingleExecutorLock(settings.data_dir / "executor.lock")
-            if start_workers else None
-        )
         if start_workers:
             for task_id in self.tasks.recover_incomplete():
                 self._submit(task_id)
 
-    def create_task(self, filename: str, stream: BinaryIO, profile_id: str) -> dict:
+    def create_task(self, filename: str, stream: BinaryIO, profile_id: str, *, task_id: str | None = None) -> dict:
         # Single-process admission: check and creation must share one critical section.
         with self._admission_lock:
-            return self._create_task(filename, stream, profile_id)
+            return self._create_task(filename, stream, profile_id, task_id=task_id)
 
-    def _create_task(self, filename: str, stream: BinaryIO, profile_id: str) -> dict:
+    def _create_task(self, filename: str, stream: BinaryIO, profile_id: str, *, task_id: str | None = None) -> dict:
         if self._closing:
             raise ProcessingCancelledError("task service is shutting down")
         if self.tasks.count_active() >= self.settings.max_active_tasks:
             raise CapacityExceededError("active task limit reached; retry later")
         profile = self.profiles.get(profile_id)
-        task_id = str(uuid4())
+        from uuid import UUID
+        task_id = task_id or str(uuid4())
+        if str(UUID(task_id)) != task_id:
+            raise UploadValidationError("invalid internal task identity")
         destination = self.settings.upload_dir / f"{task_id}.pdf"
         temporary = destination.with_suffix(".upload")
         try:

@@ -28,7 +28,7 @@ async function fetch(path, options = {}) {
   else throw Error('Unexpected request ' + path);
   return {ok: true, json: async () => body, blob: async () => new Blob(['%PDF']), text: async () => ''};
 }
-const context = vm.createContext({document: {getElementById: id => elements.get(id), createElement: element}, window: {addEventListener() {}}, fetch, Headers, FormData, Blob, URL, setTimeout, Date});
+const context = vm.createContext({document: {getElementById: id => elements.get(id), createElement: element}, window: {addEventListener() {}}, fetch, Headers, FormData, Blob, URL, setTimeout, Date, crypto: require('crypto').webcrypto});
 vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], context);
 (async () => {
   const e = id => elements.get(id);
@@ -54,7 +54,12 @@ vm.runInContext(html.match(/<script>([\s\S]*?)<\/script>/)[1], context);
   legacyCitation = true; await e('ask').onclick(); await e('citations').children[0].children[0].onclick();
   assert(calls.some(([path, options]) => path.endsWith('/documents/doc') && !options.method));
   failAsk = true; await e('ask').onclick(); assert.equal(e('answer').textContent, ''); assert.match(e('status').textContent, /失败/);
+  const failedKey = calls.at(-1)[1].headers.get('Idempotency-Key');
+  failAsk = false; await e('ask').onclick();
+  assert.equal(calls.at(-1)[1].headers.get('Idempotency-Key'), failedKey);
+  failAsk = true; await e('ask').onclick();
   await e('helpful').onclick(); assert.match(e('error').textContent, /请先完成提问/);
   assert(calls.every(([, options]) => options.headers.get('Authorization') === 'Bearer local-test-secret'));
+  assert(calls.filter(([path, options]) => path.endsWith('/ask') || (path === '/v1/tasks' && options.method)).every(([, options]) => options.headers.get('Idempotency-Key')));
   console.log('PASS: upload/index/query/quote text/page navigation/manual citation review/correction/legacy source/error cleanup/authentication');
 })().catch(error => {console.error(error); process.exitCode = 1;});

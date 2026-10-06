@@ -50,6 +50,35 @@ class PreferredReranker:
 
 
 class AdvancedRetrievalTests(unittest.TestCase):
+    def test_split_table_parents_retain_same_page_intro_without_other_rows(self):
+        def record(identifier, kind, text, sequence, page=4):
+            return {"id": identifier, "kind": kind, "text": text, "markdown": text,
+                    "pages": [page], "page_start": page, "section_path": ["Price sheet"],
+                    "metadata": {"sequence": sequence}}
+        intro = record("intro", "text", "Unit: GBP", 1)
+        first = record("first", "table", "Model Alpha costs 190. " + "a" * 32, 2)
+        later = record("later", "table", "Model Beta costs 210. " + "b" * 32, 3)
+        another_page = record("other", "table", "A separate page table has no declared currency.", 4, 5)
+        attach_parent_context([intro, first, later, another_page], "doc", max_parent_chars=75)
+        self.assertEqual(1, later["metadata"]["parent_text"].count("Unit: GBP"))
+        self.assertIn("Model Beta costs 210.", later["metadata"]["parent_text"])
+        self.assertNotIn("Model Alpha", later["metadata"]["parent_text"])
+        self.assertEqual([4], later["metadata"]["parent_pages"])
+        self.assertNotIn("Unit: GBP", another_page["metadata"]["parent_text"])
+
+    def test_table_intro_is_not_borrowed_from_other_section_or_long_prose(self):
+        chunks = chunk_pages([(1, "# Prices\n\nUnit: GBP\n\n"
+                               "# Dimensions\n\n| Model | Size |\n|---|---|\n| Alpha | 8 mm |")],
+                             document_id="sections")
+        table = next(c for c in chunks if c["kind"] == "table")
+        self.assertNotIn("Unit: GBP", table["metadata"]["parent_text"])
+        long_intro = {"id":"intro", "kind":"text", "text":"x"*1001, "markdown":"x"*1001,
+                      "pages":[1], "page_start":1, "section_path":[], "metadata":{"sequence":1}}
+        table = {"id":"row", "kind":"table", "text":"Model Alpha: 8 mm", "markdown":"Model Alpha: 8 mm",
+                 "pages":[1], "page_start":1, "section_path":[], "metadata":{"sequence":2}}
+        attach_parent_context([long_intro, table], "doc", max_parent_chars=75)
+        self.assertEqual("Model Alpha: 8 mm", table["metadata"]["parent_text"])
+
     def setUp(self):
         self.temporary = TemporaryDirectory()
         root = Path(self.temporary.name)

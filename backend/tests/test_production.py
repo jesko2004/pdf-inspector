@@ -288,7 +288,7 @@ class BackupTests(unittest.TestCase):
             target = root / "restored"
             with self.assertRaisesRegex(ValueError, "task file missing"):
                 restore_backup(archive, target)
-            self.assertEqual([], list(target.iterdir()))
+            self.assertFalse(target.exists())
 
     def test_backup_verify_and_restore(self):
         with TemporaryDirectory() as temporary:

@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>30题人工审核</title>
+<style>
+*{box-sizing:border-box}body{margin:0;background:#f6f7f9;color:#172335;font:16px/1.7 "Microsoft YaHei",sans-serif}main{max-width:1040px;margin:auto;padding:28px}h1{margin:0;font-size:30px}h2{font-size:23px}header{position:sticky;top:0;z-index:1;background:white;border-bottom:1px solid #cbd4df;padding:14px 24px}.toolbar{display:flex;gap:14px;align-items:center;flex-wrap:wrap;max-width:1040px;margin:auto}button,input,select,textarea{font:inherit;border:1px solid #8193a9;border-radius:5px;padding:8px}button{cursor:pointer;background:#164a82;color:white}input{width:190px}article{background:white;padding:24px;margin:24px 0;border:1px solid #d5dce5;border-radius:8px}.meta{color:#536479;font-size:14px}.reference{padding:12px 0;border-top:1px solid #e0e5eb;border-bottom:1px solid #e0e5eb}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.8;background:#f4f6f8;padding:16px;max-height:500px;overflow:auto}.fields{display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:20px}label{display:block}select{display:block;width:100%;background:white}textarea{width:100%;min-height:90px;margin-top:8px}a{color:#14569a}#notice{color:#a43b25;max-width:1040px;margin:auto}.index{display:flex;gap:8px;flex-wrap:wrap}.index a{min-width:35px;padding:3px 9px;text-align:center;border:1px solid #9babbe;border-radius:4px}details{margin:12px 0}summary{cursor:pointer;color:#345777}@media(max-width:700px){main{padding:16px}article{padding:16px}.fields{grid-template-columns:1fr}header{position:static}}
+</style>
+<header><div class="toolbar"><strong id="progress">已核对 0 / 30</strong><label>审核人 <input id="reviewer" maxlength="120" placeholder="填写姓名或代号"></label><button id="export">导出审核 JSON</button><button id="import">导入继续审核</button><input id="file" type="file" accept="application/json" hidden></div><p id="notice" role="status"></p></header>
+<main><h1>30题人工审核</h1><p>每题先打开 PDF 原页核对参考，再判断机器答案和引用。参考也是待核对草稿；答案全文保留。三项判断和理由由你填写。</p><p>当前答案来自已保存的 <strong>hash 向量与资料摘录</strong>，27 题待核对、3 题拒答。它们尚不是实际模型的质量验收。15 道中英对照题共 30 条，来自两份 PDF。</p><p>填写后请导出 JSON 保存；页面不会上传内容。重新打开时可导入继续审核。</p><nav class="index" aria-label="题目导航" id="index"></nav><section id="cases"></section></main>
+<script type="application/json" id="data">__REVIEW_DATA__</script>
+<script>
+const data = JSON.parse(document.getElementById('data').textContent);
+let reviews = structuredClone(data.template);
+const choices = {
+ label_verdict:[['unreviewed','尚未核对'],['confirmed','参考正确'],['incorrect','参考有误'],['uncertain','不确定']],
+ answer_verdict:[['unreviewed','尚未核对'],['correct','答案正确'],['incorrect','答案错误'],['uncertain','不确定']],
+ citation_verdict:[['unreviewed','尚未核对'],['supported','原页支持答案'],['unsupported','原页不支持'],['not_applicable','拒答 无引用可判'],['uncertain','不确定']]};
+const fields = Object.keys(choices), controls = new Map();
+const cacheKey = 'pdf-review-' + reviews.report_sha256;
+const $ = id => document.getElementById(id);
+function el(tag, text, parent) {const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (parent) parent.append(node); return node;}
+function notice(text) {$('notice').textContent = text;}
+function validate(value) {
+ if (!value || value.schema_version !== 1 || value.dataset_sha256 !== data.template.dataset_sha256 || value.report_sha256 !== data.template.report_sha256) throw Error('审核版本不匹配，请使用同一份题目与机器报告。');
+ if (!Array.isArray(value.reviews) || value.reviews.length !== 30 || new Set(value.reviews.map(r=>r.case_id)).size !== 30) throw Error('审核题目缺少或重复。');
+ const known = new Set(data.cases.map(c=>c.id));
+ for (const row of value.reviews) {
+  if (!known.has(row.case_id) || typeof row.reviewer !== 'string' || row.reviewer.length>120 || typeof row.comment !== 'string' || row.comment.length>4000 || row.failure_stage !== null) throw Error('审核字段不合法。');
+  for (const name of fields) if (!choices[name].some(([key])=>key===row[name])) throw Error('审核判断不合法。');
+  if (fields.some(name=>row[name]!=='unreviewed') && (!row.reviewer.trim() || !row.reviewed_at || !Number.isFinite(Date.parse(row.reviewed_at)))) throw Error('已有判断的题目必须有审核人和时间。');
+ }
+ return value;
+}
+function progress() {$('progress').textContent='已核对 '+reviews.reviews.filter(r=>fields.every(f=>r[f]!=='unreviewed') && r.comment.trim() && r.reviewer.trim()).length+' / 30';}
+function save() {progress();try {localStorage.setItem(cacheKey,JSON.stringify(reviews));} catch {notice('浏览器未允许缓存，请导出 JSON 保存。');}}
+function changed(row) {
+ row.reviewer=$('reviewer').value.trim();
+ row.reviewed_at=fields.some(f=>row[f]!=='unreviewed') ? new Date().toISOString() : null;
+ save();
+}
+function bind() {
+ for (const row of reviews.reviews) {
+  const c=controls.get(row.case_id);
+  for (const name of fields) {c[name].value=row[name];c[name].onchange=()=>{row[name]=c[name].value;changed(row);};}
+  c.comment.value=row.comment;c.comment.oninput=()=>{row.comment=c.comment.value;changed(row);};
+ }
+ progress();
+}
+for (const [i,item] of data.cases.entries()) {
+ const nav=el('a',String(i+1),$('index'));nav.href='#case-'+(i+1);
+ const card=el('article',undefined,$('cases'));card.id='case-'+(i+1);
+ el('p','第 '+(i+1)+' 题 · '+item.language.toUpperCase()+' · '+item.id,card).className='meta';
+ el('h2',item.query,card);
+ const source=data.sources[item.document], p=el('p',undefined,card);
+ el('span','原 PDF：',p);const full=el('a',source.filename,p);full.href=source.filename;full.target='_blank';full.rel='noopener';
+ for (const page of item.pages) {el('span','　',p);const a=el('a','参考第 '+page+' 页',p);a.href=source.filename+'#page='+page;a.target='_blank';a.rel='noopener';}
+ el('p','待核对参考：'+(item.answerable?'文档应可回答':'文档应无法回答')+'；参考答案片段：'+(item.expected_answer_fragments.join('、')||'无')+'。请以原页为准。',card).className='reference';
+ const answer=item.machine.answer||{};
+ el('h3','机器答案（全文）',card);el('p','机器状态：'+(answer.status||'失败')+'；'+(answer.refused?'本题拒答':'本题给出答案／摘录'),card).className='meta';
+ el('pre',answer.answer||item.machine.error||'未执行',card);
+ el('h3','机器引用',card);
+ if (!(answer.citations||[]).length) el('p','没有引用。若为合理拒答，可选择不适用；否则请判断是否缺少证据。',card);
+ for (const citation of answer.citations||[]) {
+  const row=el('p',undefined,card);el('span',citation.filename+' · ',row);
+  const actual=Object.values(data.sources).find(s=>s.document_id===citation.document_id);
+  for (const page of citation.pages||[]) {const a=el('a','第 '+page+' 页　',row);if(actual){a.href=actual.filename+'#page='+page;a.target='_blank';a.rel='noopener';}}
+ }
+ const details=el('details',undefined,card);el('summary','查看机器逐条证据与上下文记录',details);el('pre',JSON.stringify({claims:answer.claims||[],context:answer.context||{}},null,2),details);
+ const grid=el('div',undefined,card);grid.className='fields';const c={};
+ for (const [name,label] of [['label_verdict','1 参考标签'],['answer_verdict','2 答案判断'],['citation_verdict','3 引用判断']]) {
+  const lab=el('label',label,grid), select=el('select',undefined,lab);select.setAttribute('aria-label','第 '+(i+1)+' 题 '+label);
+  for (const [value,text] of choices[name]) {const opt=el('option',text,select);opt.value=value;}
+  c[name]=select;
+ }
+ const lab=el('label','核对理由或修正建议（请注明原页依据）',card);c.comment=el('textarea',undefined,lab);c.comment.maxLength=4000;
+ controls.set(item.id,c);
+}
+try {const cached=localStorage.getItem(cacheKey);if(cached) {reviews=validate(JSON.parse(cached));$('reviewer').value=reviews.reviews.find(r=>r.reviewer)?.reviewer||'';notice('已恢复浏览器缓存。请导出 JSON 保存。');}} catch {notice('未加载缓存，可导入已保存的审核 JSON。');}
+bind();
+$('reviewer').onchange=()=>{for(const row of reviews.reviews) if(fields.some(f=>row[f]!=='unreviewed') && !row.reviewer) row.reviewer=$('reviewer').value.trim();save();};
+$('export').onclick=()=>{
+ try {
+  validate(reviews);
+  for (const row of reviews.reviews) if(fields.some(f=>row[f]!=='unreviewed')&&!row.comment.trim()) throw Error('请填写已有判断题目的核对理由。');
+  const blob=new Blob([JSON.stringify(reviews,null,2)+'\n'],{type:'application/json'}),url=URL.createObjectURL(blob),link=el('a');
+  link.href=url;link.download='30题人工审核结果.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice('已导出；请保留该文件，可导入继续填写。');
+ } catch(error){notice(error.message);}
+};
+$('import').onclick=()=>{$('file').click();};
+$('file').onchange=async()=>{try{const file=$('file').files[0];if(!file)return;reviews=validate(JSON.parse(await file.text()));$('reviewer').value=reviews.reviews.find(r=>r.reviewer)?.reviewer||'';bind();save();notice('已导入审核记录。');}catch(error){notice(error.message);}finally{$('file').value='';}};
+</script></html>

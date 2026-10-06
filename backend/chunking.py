@@ -361,6 +361,9 @@ def chunk_pages_with_report(
                 level = len(match.group(1))
                 title = match.group(2).strip()
                 section_path[level - 1 :] = [title]
+                # Extractors can classify factual lines (units, dates, values)
+                # as headings. Retain their text as evidence, not metadata only.
+                pending.append(title)
                 continue
             if block.kind == "table":
                 emit_pending(pending, page)

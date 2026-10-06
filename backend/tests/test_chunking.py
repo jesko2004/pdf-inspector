@@ -32,6 +32,27 @@ class ChunkingTests(unittest.TestCase):
         self.assertEqual(first, second)
         self.assertEqual(1, len(first))
 
+    def test_factual_headings_remain_searchable_and_quotable(self):
+        chunks = chunk_pages(
+            [(2, "# Device reference\n\n## U = Supply voltage (V)\n\n"
+                 "## Released January 2 2024\n\n## Specifications\n\n"
+                 "| Key | Value |\n|---|---|\n| Weight | 2 kg |")],
+            document_id="factual-headings",
+        )
+        voltage = next(c for c in chunks if "U = Supply voltage (V)" in c["text"])
+        release = next(c for c in chunks if "Released January 2 2024" in c["text"])
+        self.assertEqual([2], voltage["pages"])
+        self.assertEqual(["Device reference", "U = Supply voltage (V)"], voltage["section_path"])
+        self.assertIn("U = Supply voltage (V)", voltage["metadata"]["parent_text"])
+        self.assertEqual([2], release["pages"])
+        self.assertTrue(any(c["kind"] == "table" and "Weight" in c["text"] for c in chunks))
+
+    def test_heading_only_page_retains_source_identity(self):
+        chunks = chunk_pages([(4, "## Maximum voltage 48 V")], document_id="title-only")
+        self.assertEqual(1, len(chunks))
+        self.assertEqual("Maximum voltage 48 V", chunks[0]["text"])
+        self.assertEqual([4], chunks[0]["pages"])
+
     def test_removes_repeated_margins_and_reports_quality(self):
         labels = ["Alpha", "Beta", "Gamma"]
         pages = [

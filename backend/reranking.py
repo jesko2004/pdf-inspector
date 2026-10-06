@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Protocol
 
 from .config import Settings
+from .process_isolation import ProcessRunner
 
 
 class RerankerProvider(Protocol):
@@ -19,7 +20,7 @@ class RerankerProvider(Protocol):
 
 
 class FlashRankReranker:
-    """CPU-only FlashRank adapter loaded once during service startup."""
+    """CPU-only FlashRank adapter loaded inside each bounded worker."""
 
     name = "flashrank"
 
@@ -78,13 +79,44 @@ class FlashRankReranker:
         return ranked
 
 
+class IsolatedReranker:
+    """Each optional local inference has a finite, killable process lifetime."""
+
+    name = "flashrank"
+
+    def __init__(self, settings: Settings, *, worker_command=None):
+        self.model = settings.rerank_model
+        self.settings = settings
+        self.runner = ProcessRunner(workers=1, memory_mb=settings.process_memory_mb,
+            max_result_bytes=settings.process_max_result_bytes,
+            temporary_dir=settings.data_dir / "work", worker_command=worker_command)
+
+    def rerank(self, query, candidates, top_n):
+        ranked = self.runner.run({"operation": "rerank", "model": self.model,
+            "cache_dir": str(self.settings.rerank_cache_dir.resolve()),
+            "max_length": self.settings.rerank_max_length, "query": query,
+            "candidates": [{"chunk_id": c["chunk_id"], "content": c["content"]} for c in candidates],
+            "top_n": top_n}, timeout_seconds=self.settings.rerank_timeout_ms / 1000)
+        if not isinstance(ranked, list) or len(ranked) != min(top_n, len(candidates)):
+            raise ValueError("invalid isolated reranking result")
+        allowed = {c["chunk_id"] for c in candidates}
+        seen = set()
+        result = []
+        for chunk_id, raw_score in ranked:
+            score = float(raw_score)
+            if chunk_id not in allowed or chunk_id in seen or not math.isfinite(score):
+                raise ValueError("invalid isolated reranking candidate")
+            seen.add(chunk_id)
+            result.append((chunk_id, score))
+        return result
+
+    def close(self):
+        self.runner.close()
+
+
 def create_reranker(settings: Settings) -> RerankerProvider | None:
     if settings.rerank_provider == "none":
         return None
     if settings.rerank_provider == "flashrank":
-        return FlashRankReranker(
-            model=settings.rerank_model,
-            cache_dir=settings.rerank_cache_dir,
-            max_length=settings.rerank_max_length,
-        )
+        return IsolatedReranker(settings)
     raise ValueError(f"unsupported rerank provider: {settings.rerank_provider}")

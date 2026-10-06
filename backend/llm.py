@@ -97,6 +97,7 @@ class OpenAICompatibleLlmProvider:
         timeout_seconds: float = 120,
         transport: Transport = _default_transport,
         stream_transport: StreamTransport = _default_stream_transport,
+        response_schema: dict | None = None,
     ):
         if not base_url.startswith(("http://", "https://")):
             raise ValueError("LLM base URL must use http:// or https://")
@@ -106,6 +107,7 @@ class OpenAICompatibleLlmProvider:
         self.timeout_seconds = timeout_seconds
         self.transport = transport
         self.stream_transport = stream_transport
+        self.response_schema = response_schema
 
     @property
     def endpoint(self) -> str:
@@ -123,6 +125,14 @@ class OpenAICompatibleLlmProvider:
             "max_tokens": max_tokens,
             "stream": stream,
         }
+        if self.response_schema is not None:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "grounded_answer", "strict": True,
+                    "schema": self.response_schema,
+                },
+            }
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
@@ -154,7 +164,18 @@ class OpenAICompatibleLlmProvider:
             if reason is not None and reason != "stop":
                 raise LlmError(f"LLM generation did not complete normally: {reason}")
             text = payload["choices"][0]["message"]["content"].strip()
-            usage = {key: int(value) for key, value in payload.get("usage", {}).items()}
+            # OpenAI-compatible endpoints may include nested *_tokens_details.
+            # Keep top-level totals only; adding detail counts would double count.
+            reported_usage = payload.get("usage", {})
+            if not isinstance(reported_usage, dict):
+                raise ValueError("invalid usage object")
+            usage = {
+                key: reported_usage[key]
+                for key in ("prompt_tokens", "completion_tokens", "total_tokens")
+                if key in reported_usage
+            }
+            if any(type(count) is not int or count < 0 for count in usage.values()):
+                raise ValueError("invalid token count")
         except (
             KeyError,
             IndexError,
@@ -238,6 +259,7 @@ def create_llm_provider(
     base_url: str | None,
     api_key: str | None,
     timeout_seconds: float,
+    response_schema: dict | None = None,
 ) -> LlmProvider:
     if provider == "extractive":
         return ExtractiveLlmProvider(model)
@@ -251,5 +273,6 @@ def create_llm_provider(
             api_key=api_key,
             model=model,
             timeout_seconds=timeout_seconds,
+            response_schema=response_schema,
         )
     raise LlmError(f"unknown LLM provider: {provider}")

@@ -38,6 +38,8 @@ class PgVectorIntegrationTests(unittest.TestCase):
             second = make_record("second", [0.0, 1.0, 0.0])
             store.upsert([first, second])
             self.assertEqual(2, store.count(document_id=document_id))
+            self.assertEqual({first.chunk_id, second.chunk_id}, set(store.chunk_ids(knowledge_base_id, document_id=document_id)))
+            self.assertEqual([], store.chunk_ids(knowledge_base_id, document_id="other"))
             hits = store.search(
                 VectorSearchQuery(
                     knowledge_base_id=knowledge_base_id,
@@ -64,6 +66,40 @@ class PgVectorIntegrationTests(unittest.TestCase):
             self.assertEqual(0, store.count(document_id=document_id))
         finally:
             store.delete_knowledge_base(knowledge_base_id)
+
+    def test_real_pgvector_generation_rollback_and_reader_safe_gc(self):
+        from backend.tests.test_index_lifecycle import IndexLifecycleTests
+        from backend.tests.test_knowledge_service import chunk
+        from backend.index_lifecycle import leased_snapshot
+        from backend.knowledge_store import KnowledgeStore
+
+        fixture = IndexLifecycleTests()
+        fixture.setUp()
+        try:
+            fixture.vectors = PgVectorStore(PGVECTOR_DSN)
+            fixture.service.vector_store = fixture.vectors
+            document, old = fixture.publish("old")
+            fixture.publish("new")
+            fixture.rollback(old)
+            fixture.assert_only_task("old")
+            fixture.service.store = KnowledgeStore(fixture.store.database_path)
+            fixture.assert_only_task("old")
+            fixture.service.reindex_knowledge_base(fixture.kb["id"], embedding_provider=None, embedding_model=None, embedding_dimensions=None)
+            fixture.service.run_pending()
+            fixture.assert_only_task("new")
+            with leased_snapshot(fixture.store, fixture.kb["id"], document_ids=[], versions=[], as_of=None, include_historical=False):
+                fixture.prepare("latest", [chunk("latest")])
+                fixture.service.run_pending()
+                result = fixture.gc(keep_generations=1, dry_run=False, expected_generation_id=fixture.current())
+                self.assertEqual(1, result["deferred_vectors"])
+                self.assertEqual(2, fixture.vectors.count(document_id=document["id"]))
+            fixture.service._drain_vector_deletions()
+            self.assertEqual(1, fixture.vectors.count(document_id=document["id"]))
+            fixture.assert_only_task("latest")
+        finally:
+            if hasattr(fixture, "kb"):
+                fixture.vectors.delete_knowledge_base(fixture.kb["id"])
+            fixture.tearDown()
 
 
 if __name__ == "__main__":

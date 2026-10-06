@@ -339,6 +339,28 @@ class KnowledgeAskRequest(BaseModel):
         return self
 
 
+class IndexGarbageCollectionRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    keep_generations: int = Field(default=2, ge=1, le=100, strict=True)
+    dry_run: bool = Field(default=True, strict=True)
+    expected_generation_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+    @model_validator(mode="after")
+    def require_expected_generation(self):
+        if not self.dry_run and (not self.expected_generation_id or not self.expected_generation_id.strip()):
+            raise ValueError("expected_generation_id is required when applying garbage collection")
+        return self
+
+
+class IndexRollbackRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    generation_id: str = Field(min_length=1, max_length=100)
+    expected_generation_id: str = Field(min_length=1, max_length=100)
+    reason: str = Field(min_length=1, max_length=1000)
+
+
 class KnowledgeFeedbackCreate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
