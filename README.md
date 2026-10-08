@@ -4,7 +4,7 @@
 
 使用 Rust 解析 PDF，将可提取的文字、表格和页面结构转换为 Markdown 或 JSON；提供 Python、Node.js 和浏览器 WebAssembly 绑定。可选本地后端支持扫描页文字识别、业务字段提取、知识库检索、来源引用及备份恢复。
 
-[快速开始](#快速开始) · [本地后端](#本地后端) · [验收与适用边界](#验收与适用边界) · [文档入口](#文档入口)
+[Windows 桌面端](#windows-桌面端exe) · [快速开始](#快速开始) · [本地后端](#本地后端) · [验收与适用边界](#验收与适用边界) · [文档入口](#文档入口)
 
 **项目关键词：** PDF 解析 · 文字提取 · 文档分类 · 表格识别 · 本地文字识别 · 知识库检索
 
@@ -30,6 +30,58 @@
 | 可选本地后端 | 提供异步任务、业务模板、本地文字识别、知识库检索、权限控制、审计和备份恢复 |
 
 Rust 核心本身不执行光学字符识别（OCR），也不需要加载识别模型。需要扫描页识别时，可启用后端的本地 RapidOCR；其依赖和模型需要单独准备。
+
+## Windows 桌面端（exe）
+
+**双击根目录的 [`PDF资料库.exe`](PDF资料库.exe)，在独立桌面窗口中导入 PDF、管理知识库和提问，无需打开浏览器。** 当前版本：`2026.10.08.4`，支持 Windows x64。
+
+![资料库界面：知识库管理与已保存资料](docs/images/desktop-knowledge-base.png)
+
+### 已配置过本地环境
+
+1. 下载完整仓库或更新项目文件，保留原来的 `.codex-tools` 和 `.pdf-inspector-data` 目录。
+2. 双击 `PDF资料库.exe`，等待窗口完成启动。本机未启用鉴权时，API 密钥留空。
+3. 首次打开会加载已有知识库；没有知识库时自动建立“我的资料”。“新知识库名称”初始为空，需要分类时再填写。
+4. 在“新增资料”中选择 PDF，点击“保存资料”，等待“已保存”后即可提问。
+5. 用完直接关闭窗口。下次打开会恢复上次使用的知识库和已导入资料，无需重新导入。
+
+| 操作 | 使用方法 |
+|---|---|
+| 查询已保存的简历 | 在资料列表点击“查询此资料”，输入问题后点击“提问” |
+| 更新简历 | 点击原资料旁的“更新此资料”，选择新版 PDF，点击“更新并保存”；沿用原条目，避免重复堆积 |
+| 删除不用的知识库 | 选中知识库，点击红色“删除知识库”，核对名称和资料数量后确认 |
+| 刷新界面 | 点击窗口顶部“重新加载”；仅刷新列表时点击“加载知识库” |
+| 启动失败 | 查看界面提示，可点击“重试启动”或“查看日志”；8000 端口被占用时先正常关闭旧服务 |
+
+资料保存在项目下 `.pdf-inspector-data/ollama-local`，桌面窗口的选择记录保存在 `.pdf-inspector-data/desktop-profile`。从浏览器第一次切换到桌面版时，选择一次原知识库即可；已有文件仍可直接使用。删除最后一个知识库后保持空列表，不会在重开时自动建回。
+
+### 新电脑首次准备
+
+当前 exe 复用项目中的 Python 后台、Rust 提取扩展和本地模型，**不是下载单个 exe 就能运行的完整安装包**。请下载完整仓库，保留同目录下的 `PDF资料库.exe.config` 和 `desktop-runtime`，并准备以下环境：
+
+- Windows x64、.NET Framework 4.8、[Microsoft WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。
+- Python 3.12、Rust 工具链及 Windows C/C++ 编译工具；安装并启动 [Ollama](https://ollama.com/download/windows)。
+- 在项目根目录运行下面的 PowerShell 命令，首次安装依赖和模型需要联网及足够磁盘空间：
+
+```powershell
+# 创建桌面端使用的 Python 环境，并构建原生 PDF 提取扩展
+py -3.12 -m venv .codex-tools/api-venv
+& ./.codex-tools/api-venv/Scripts/python.exe -m pip install ".[backend,ocr]"
+
+# 准备本地向量模型和回答模型
+ollama pull qwen3-embedding:0.6b
+ollama pull qwen3:4b-instruct
+Invoke-RestMethod -Uri 'http://127.0.0.1:11434/api/create' -Method Post -ContentType 'application/json' -Body '{"model":"pdf-inspector-qwen3-instruct:4b","from":"qwen3:4b-instruct","parameters":{"num_ctx":8192,"seed":42},"stream":false}'
+
+# 准备完成后打开独立窗口
+Start-Process ./PDF资料库.exe
+```
+
+程序默认使用仓库内的 [本地模型配置](tools/local-launcher/use-ollama.ps1)；已有 `.codex-tools/use-ollama.ps1` 时优先沿用，不覆盖你的本机配置。资料库启动时不会自动下载模型。
+
+桌面程序源码和构建脚本位于 [`tools/local-launcher`](tools/local-launcher)。可运行 `./tools/local-launcher/build.ps1` 重新生成 exe 和配套组件；首次构建会下载固定版本的 WebView2 SDK。完整说明见 [桌面端使用说明](tools/local-launcher/使用说明.md)。
+
+桌面版已验证关闭重开、原位更新、查询和删除流程，并完成项目要求的完整 200 份 PDF 回归；结果与范围见 [桌面版验证记录](docs/desktop-validation-2026-10-08.md)。
 
 ## 快速开始
 
@@ -288,6 +340,7 @@ cargo build --release
 | 浏览器接口 | [WebAssembly 使用说明](wasm/README.md) |
 | Rust 接口 | [类型与调用说明](docs/rust-api.md) |
 | 本地后端 | [配置、接口和运维说明](docs/backend.md) |
+| Windows 桌面端 | [exe 使用、资料保存与故障处理](tools/local-launcher/使用说明.md) |
 | 已知发票模板 | [模板导入与适用范围](docs/yeslogic-invoice-template.md) |
 | 验收记录 | [最终报告](docs/acceptance-final-report.md) · [复现步骤](docs/acceptance-reproduction.md) |
 

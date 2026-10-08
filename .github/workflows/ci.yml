@@ -10,6 +10,23 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  desktop:
+    name: Windows desktop
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build desktop executable and WebView2 components
+        shell: pwsh
+        run: ./tools/local-launcher/build.ps1
+      - name: Upload desktop entry and components
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-desktop-entry
+          path: |
+            PDF资料库.exe
+            PDF资料库.exe.config
+            desktop-runtime/
+
   backend:
     name: Backend
     runs-on: ubuntu-latest
@@ -71,6 +88,13 @@ jobs:
 
       - name: Test developer scripts
         run: python3 -m unittest discover -s scripts/tests
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Test knowledge base interface
+        run: node scripts/test_manual_ui.cjs
 
   fmt:
     name: Format

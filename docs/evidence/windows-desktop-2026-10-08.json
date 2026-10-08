@@ -1,0 +1,130 @@
+{
+  "date": "2026-10-08",
+  "desktop_version": "2026.10.08.4",
+  "scope": "Windows x64 desktop entry, persisted knowledge bases, document upload/replacement, saved-content query and deletion; clean staged source with repository model defaults",
+  "checks": {
+    "cargo_fmt": "passed",
+    "cargo_clippy_D_warnings": "passed",
+    "rust_tests": 893,
+    "backend_tests_run": 255,
+    "backend_tests_skipped": 2,
+    "backend_note": "Optional pgvector integration tests require an external database; local SQLite workflow tested.",
+    "developer_script_tests": 23,
+    "manual_ui_node": "passed"
+  },
+  "desktop_executable": {
+    "path": "PDF资料库.exe",
+    "sha256": "3ad4d586ae0c2b4e115d7760c9945694143d03c9c3ab6694c23b601a21bf6aea"
+  },
+  "desktop_phases": {
+    "create": {
+      "phase": "create",
+      "ui_version": "2026.10.08.4",
+      "current_interface": true,
+      "blank_new_name": true,
+      "secure_file_hashing": true,
+      "native_dialog_and_file_support": true,
+      "retrieval_options": true,
+      "document_saved": true,
+      "embedded_window": true,
+      "status": "passed",
+      "graceful_stop": true
+    },
+    "reopen": {
+      "phase": "reopen",
+      "ui_version": "2026.10.08.4",
+      "current_interface": true,
+      "blank_new_name": true,
+      "secure_file_hashing": true,
+      "native_dialog_and_file_support": true,
+      "retrieval_options": true,
+      "selection_restored": true,
+      "document_restored": true,
+      "in_place_update": true,
+      "saved_document_query": true,
+      "embedded_window": true,
+      "status": "passed",
+      "graceful_stop": true
+    },
+    "delete": {
+      "phase": "delete",
+      "ui_version": "2026.10.08.4",
+      "current_interface": true,
+      "blank_new_name": true,
+      "secure_file_hashing": true,
+      "native_dialog_and_file_support": true,
+      "retrieval_options": true,
+      "updated_file_survives_restart": true,
+      "delete_selected_base": true,
+      "last_delete_stays_empty": true,
+      "embedded_window": true,
+      "status": "passed",
+      "graceful_stop": true
+    },
+    "empty": {
+      "phase": "empty",
+      "ui_version": "2026.10.08.4",
+      "current_interface": true,
+      "blank_new_name": true,
+      "secure_file_hashing": true,
+      "native_dialog_and_file_support": true,
+      "retrieval_options": true,
+      "empty_state_survives_restart": true,
+      "embedded_window": true,
+      "status": "passed",
+      "graceful_stop": true
+    }
+  },
+  "external_regression": {
+    "status": "passed",
+    "documents": 200,
+    "corpus_repository": "https://github.com/firecrawl/opendataloader-bench",
+    "corpus_commit": "340f25d70f5b2dbc4bc1cc6b154769f74b1fc745",
+    "baseline_commit": "13cf480813f7a77a9adbe723c15ac246a023a9be",
+    "snapshots_changed": 0,
+    "execution_errors": 0,
+    "scores": {
+      "baseline": {
+        "overall_mean": 0.8692001161349501,
+        "nid_mean": 0.9124964183569978,
+        "nid_s_mean": 0.8920357012866394,
+        "teds_mean": 0.7464057391352177,
+        "teds_s_mean": 0.7974125767394663,
+        "mhs_mean": 0.7904020761603352,
+        "mhs_s_mean": 0.8729162429409819
+      },
+      "candidate": {
+        "overall_mean": 0.8692001161349501,
+        "nid_mean": 0.9124964183569978,
+        "nid_s_mean": 0.8920357012866394,
+        "teds_mean": 0.7464057391352177,
+        "teds_s_mean": 0.7974125767394663,
+        "mhs_mean": 0.7904020761603352,
+        "mhs_s_mean": 0.8729162429409819
+      }
+    },
+    "empty_markdown_ids": {
+      "baseline": [
+        "01030000000141"
+      ],
+      "candidate": [
+        "01030000000141"
+      ]
+    },
+    "failures": []
+  },
+  "raw_regression_report": {
+    "path": "test_output/external/desktop-public-200-20261008/report.json",
+    "sha256": "52aeb68118deb71a7ea9addce3d751e71b26d9cbca13b6d5981b1d8d54e1e9cb"
+  },
+  "raw_backend_log": {
+    "path": "tmp/github-desktop-backend-final.log",
+    "sha256": "716e5b7ae67ce1bb3401d4064eb34fac2650f87ccea67af577d75298824bf728"
+  },
+  "original_pdf_evals": "not obtained / not executed; complete public 200-PDF corpus is the owner-approved alternative under AGENTS.md",
+  "limits": [
+    "The desktop entry requires the complete project, local Python/native extraction environment, WebView2 runtime and downloaded Ollama models.",
+    "Desktop automation uses isolated synthetic test libraries, not personal resumes.",
+    "Passing extraction regression and workflow tests does not guarantee every model answer is factually correct."
+  ]
+}

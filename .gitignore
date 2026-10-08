@@ -46,3 +46,9 @@ __pycache__/
 *.pyc
 .pytest_cache/
 .pdf-inspector-data/
+
+# Local documents, previews and runtime test output (never publish personal data).
+/tmp/
+/output/
+/.codex_docx_render/
+~$*.docx

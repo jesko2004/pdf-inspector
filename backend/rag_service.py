@@ -263,7 +263,7 @@ class RagService:
 
     def _validate(self, prepared: PreparedAnswer, text: str) -> dict[str, Any]:
         if self._structured() and not prepared.refused:
-            return validate_grounded_answer(text, prepared.sources)
+            return validate_grounded_answer(text, prepared.sources, restore_line_breaks=True)
         validation = validate_answer(
             text, prepared.citations,
             extractive=self.settings.llm_provider == "extractive",
