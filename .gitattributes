@@ -1,0 +1,2 @@
+# Preserve the upstream third-party license verbatim, including original spacing.
+desktop-runtime/WebView2-LICENSE.txt whitespace=-blank-at-eol

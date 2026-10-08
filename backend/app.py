@@ -320,7 +320,14 @@ def create_app(
 
     @app.get("/demo", response_class=FileResponse)
     def manual_demo():
-        return FileResponse(Path(__file__).parent / "static" / "manual.html")
+        return FileResponse(
+            Path(__file__).parent / "static" / "manual.html",
+            headers={
+                "Cache-Control": "no-store, max-age=0",
+                "Pragma": "no-cache",
+                "Expires": "0",
+            },
+        )
 
     @app.get("/metrics", response_class=Response)
     def prometheus_metrics() -> Response:

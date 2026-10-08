@@ -38,6 +38,69 @@ class Provider:
 
 
 class GroundedAnswerTests(unittest.TestCase):
+    def test_unique_reformatted_line_breaks_are_restored_and_audited(self):
+        body = "2028/03-2028/07\nExample Tool (Automation)"
+        source = {"chunk_id": "chunk-1", "text": body,
+                  "citation": {"filename": "profile.pdf", "pages": [1]}}
+        model_quote = body.replace("\n", " ")
+        result = validate_grounded_answer(contract(model_quote), [source], restore_line_breaks=True)
+        self.assertEqual(body, result["claims"][0]["evidence"][0]["quote"])
+        self.assertEqual("exact_match", result["validation"]["evidence_quotes"])
+        self.assertEqual([{"chunk_id": "chunk-1", "model_quote": model_quote, "source_quote": body}],
+                         result["validation"]["evidence_line_break_restorations"])
+        self.assertEqual(body, source["text"])
+
+    def test_line_break_restoration_rejects_changed_words_and_ambiguous_spans(self):
+        cases = [
+            ("Supply\n24 V", "Supply 25 V"),
+            ("Supply\n24 V", "Supply24 V"),
+            ("Supply24 V", "Supply 24 V"),
+            ("Supply\n24 V", "supply 24 V"),
+            ("Supply\n24 V", "Supply ２４ V"),
+            ("Supply\nnot\n24 V", "Supply 24 V"),
+            ("Supply\n24 V; Supply\r\n24 V", "Supply 24 V"),
+            ("A\nA\nA", "A A"),
+            ("Supply\n" + " " * 4000 + "24 V", "Supply 24 V"),
+            ("Supply  24 V", "Supply 24 V"),
+        ]
+        for body, quote in cases:
+            with self.subTest(body=body, quote=quote), self.assertRaises(LlmError):
+                validate_grounded_answer(contract(quote), [{
+                    "chunk_id": "chunk-1", "text": body,
+                    "citation": {"filename": "manual.pdf", "pages": [1]},
+                }], restore_line_breaks=True)
+        with self.assertRaises(LlmError):
+            validate_grounded_answer(contract("Supply 24 V", "outside"), [{
+                "chunk_id": "chunk-1", "text": "Supply\n24 V",
+                "citation": {"filename": "manual.pdf", "pages": [1]},
+            }], restore_line_breaks=True)
+
+    def test_line_break_restoration_agrees_in_normal_and_buffered_stream_answers(self):
+        body = "Supply\n24 V"
+        with TemporaryDirectory() as root:
+            service, prepared, _ = self.service(root, contract("Supply 24 V"), [fixtures.source_item(body)])
+            result = service.answer(prepared)
+            events = list(service.stream(prepared))
+        self.assertEqual(body, result["claims"][0]["evidence"][0]["quote"])
+        self.assertEqual(result["claims"], events[-1]["data"]["claims"])
+        self.assertEqual(result["validation"], events[-1]["data"]["validation"])
+        self.assertEqual(["metadata", "token", "done"], [item["event"] for item in events])
+
+    def test_multiline_evidence_keeps_line_breaks_or_quotes_lines_separately(self):
+        body = "2028/03-2028/07\nExample Tool (Automation)"
+        source = {"chunk_id": "chunk-1", "text": body,
+                  "citation": {"filename": "profile.pdf", "pages": [1]}}
+        result = validate_grounded_answer(contract(body), [source])
+        self.assertEqual(body, result["claims"][0]["evidence"][0]["quote"])
+        payload = json.loads(contract())
+        payload["claims"][0]["evidence"] = [
+            {"chunk_id": "chunk-1", "quote": line} for line in body.splitlines()
+        ]
+        result = validate_grounded_answer(json.dumps(payload), [source])
+        self.assertEqual(body.splitlines(), [item["quote"] for item in result["claims"][0]["evidence"]])
+        with self.assertRaises(LlmError):
+            validate_grounded_answer(contract(body.replace("\n", " ")), [source])
+
     def test_duplicate_claims_keep_first_evidence_and_audit_later_copies(self):
         source = {"chunk_id": "chunk-1", "text": "Supply 24 V; frequency 50 Hz",
                   "citation": {"chunk_id": "chunk-1", "filename": "manual.pdf", "pages": [1]}}

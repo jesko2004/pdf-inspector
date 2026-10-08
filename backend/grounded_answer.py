@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import re
+from itertools import islice
 from typing import Annotated
 
 from pydantic import (
@@ -55,7 +56,10 @@ SYSTEM_PROMPT = (
     "For a price, inspect the document or table header for its currency, include that "
     "currency in the claim, and add a verbatim header quote if it is separate from the row. "
     "Use only supplied chunk_id values. Copy each quote verbatim from the decoded source body, "
-    "including punctuation and whitespace. Quotes must support the claim, not merely share keywords. "
+    "including punctuation and whitespace. Prefer a short quote from a single original line. "
+    "Never join separate source lines with spaces or rewrite a quote. When supporting facts "
+    "appear on separate lines, use separate evidence entries for those exact lines. "
+    "Quotes must support the claim, not merely share keywords. "
     "Do not put filename/page citation syntax in claim text; the server adds citations. "
     "Write claim text in the question's primary language, translating source labels as needed; "
     "do not copy English table notation as the answer to a Chinese question. Keep quotes verbatim. "
@@ -134,7 +138,26 @@ def _table_quote_context(body: str, quote: str) -> list[str]:
     return context
 
 
-def validate_grounded_answer(text: str, sources: list[dict]) -> dict:
+def _restore_unique_line_breaks(body: str, quote: str) -> str | None:
+    """Recover a unique original span whose whitespace was reformatted.
+
+    Non-whitespace characters must remain identical and in the same order.
+    Separators cannot be inserted or removed. No fuzzy or Unicode matching.
+    """
+    pattern = r"\s+".join(re.escape(part) for part in re.split(r"\s+", quote))
+    # Lookahead also detects overlapping occurrences; uniqueness is required.
+    matches = list(islice(re.finditer("(?=(" + pattern + "))", body), 2))
+    if len(matches) != 1:
+        return None
+    original = matches[0].group(1)
+    if len(original) > 4000 or ("\n" not in original and "\r" not in original):
+        return None
+    return original
+
+
+def validate_grounded_answer(
+    text: str, sources: list[dict], *, restore_line_breaks: bool = False
+) -> dict:
     # Canonical refusal remains compatible with existing model integrations.
     if text.strip() == REFUSAL:
         return _refusal_result()
@@ -156,17 +179,25 @@ def validate_grounded_answer(text: str, sources: list[dict]) -> dict:
     unique_claims = []
     duplicate_claims = []
     seen_claims = set()
+    line_break_restorations = []
     for claim in answer.claims:
         if not claim.text.strip() or re.search(r"\[[^\]\n]*\bpp?\.\s*\d", claim.text):
             raise LlmError("LLM claim contains empty text or model-generated citation syntax")
         references = {}
         for evidence in claim.evidence:
             source = allowed.get(evidence.chunk_id)
-            if (
-                source is None
-                or not evidence.quote.strip()
-                or evidence.quote not in source["text"]
-            ):
+            if source is None or not evidence.quote.strip():
+                raise LlmError("LLM evidence is absent from the supplied context")
+            if evidence.quote not in source["text"] and restore_line_breaks:
+                original = _restore_unique_line_breaks(source["text"], evidence.quote)
+                if original is not None:
+                    line_break_restorations.append({
+                        "chunk_id": evidence.chunk_id,
+                        "model_quote": evidence.quote,
+                        "source_quote": original,
+                    })
+                    evidence.quote = original
+            if evidence.quote not in source["text"]:
                 raise LlmError("LLM evidence is absent from the supplied context")
         # Keep the first exact statement and retain subsequent copies for audit.
         # All copies must still pass contract and quote validation above.
@@ -182,8 +213,8 @@ def validate_grounded_answer(text: str, sources: list[dict]) -> dict:
             references[evidence.chunk_id] = " ".join(
                 f'[{citation["filename"]} p.{page}]' for page in citation["pages"]
             )
-        # Validate every model-supplied entry first. Context never repairs an
-        # invented excerpt, unknown source or malformed contract.
+        # Every retained quote is now an exact span of its supplied source.
+        # Table context never repairs text, identity, or contract errors.
         additions = []
         for evidence in claim.evidence:
             for quote in _table_quote_context(allowed[evidence.chunk_id]["text"], evidence.quote):
@@ -204,6 +235,7 @@ def validate_grounded_answer(text: str, sources: list[dict]) -> dict:
             "citation_identity": "valid", "evidence_quotes": "exact_match",
             "semantic_support": "model_asserted_not_independently_checked",
             "evidence_context_entries_added": enriched,
+            "evidence_line_break_restorations": line_break_restorations,
             "duplicate_claims_omitted": duplicate_claims,
         },
     }

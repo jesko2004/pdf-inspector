@@ -2,6 +2,7 @@
 <html lang="zh-CN">
 <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>PDF 资料查询</title>
+<meta name="pdf-inspector-ui-version" content="2026.10.08.4">
 <style>
 body{font-family:system-ui,"Microsoft YaHei",sans-serif;margin:32px auto;padding:0 22px;max-width:900px;color:#18243a;background:#f6f8fc}h1{font-size:28px}section{background:white;padding:22px;margin:18px 0;border:1px solid #dbe2ed;border-radius:12px}label{display:block;margin:12px 0 6px}input,select,textarea,button{font:inherit;padding:9px;border:1px solid #bdc8d9;border-radius:6px}textarea{width:95%;min-height:75px}button{background:#254ca0;color:white;cursor:pointer;margin:6px 8px 6px 0}button:disabled{opacity:.5;cursor:wait}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.6}small{color:#526078}.row{display:flex;gap:12px;flex-wrap:wrap}.status{color:#364e79}iframe{width:100%;height:650px;border:1px solid #bdc8d9}#error{color:#a32222}
 </style>
@@ -13,24 +14,81 @@ body{font-family:system-ui,"Microsoft YaHei",sans-serif;margin:32px auto;padding
 <section><h2>连接与知识库</h2>
 <label for="key">API 密钥（本机未启用鉴权时留空）</label><input id="key" type="password" autocomplete="off">
 <button id="connect">加载知识库</button>
-<label for="kb">知识库</label><select id="kb"></select>
-<label for="name">新知识库名称</label><input id="name" value="资料查询"><button id="create">创建</button>
+<label for="kb">知识库</label><select id="kb"><option value="">正在加载…</option></select>
+<button id="deleteKb" disabled style="background:#a32222">删除知识库</button>
+<p id="deleteStatus" class="status" aria-live="polite"></p>
+<p id="libraryStatus" class="status" aria-live="polite"></p>
+<label for="name">新知识库名称</label><input id="name" placeholder="请输入知识库名称" maxlength="120" aria-describedby="nameHelp"><button id="create" disabled>创建</button>
+<p><small id="nameHelp">首次使用会自动建立“我的资料”；需要分类管理时，可另建知识库。</small></p>
+<p id="createStatus" class="status" aria-live="polite"></p>
+<h3>已导入的资料</h3><p id="documentsStatus" class="status" aria-live="polite"></p><ul id="documents"></ul>
 <small id="models"></small></section>
-<section><h2>上传与入库</h2><label for="file">PDF 文件</label><input id="file" type="file" accept="application/pdf">
-<div class="row"><div><label for="documentKey">文档标识（更新时沿用）</label><input id="documentKey" placeholder="manual-a"></div><div><label for="version">版本</label><input id="version" value="v1"></div></div>
-<button id="upload">上传并入库</button><p id="progress" class="status" aria-live="polite"></p></section>
-<section><h2>提问与核对</h2><label for="question">问题</label><textarea id="question" placeholder="这份资料中某项参数是多少？"></textarea>
-<div class="row"><div><label for="mode">检索方式</label><select id="mode"><option value="hybrid">向量与 BM25 混合</option value="bm25">BM25</option><option value="vector">向量</option></select></div><div><label for="rrf">RRF k</label><input id="rrf" type="number" min="1" max="10000" value="60"></div></div>
+<section><h2>上传与更新</h2><label for="uploadTarget">本次操作</label><select id="uploadTarget"><option value="">新增资料</option></select>
+<p id="uploadHint" class="status">选择 PDF 后即可保存；更新简历时，先选择要更新的资料。</p>
+<label for="file">PDF 文件</label><input id="file" type="file" accept="application/pdf">
+<button id="upload" disabled>保存资料</button><p id="progress" class="status" aria-live="polite"></p></section>
+<section><h2>提问与核对</h2><label for="documentScope">查询范围</label><select id="documentScope"><option value="">当前知识库全部资料</option></select>
+<label for="question">问题</label><textarea id="question" placeholder="这份资料中某项参数是多少？"></textarea>
+<div class="row"><div><label for="mode">检索方式</label><select id="mode"><option value="hybrid">向量与 BM25 混合</option><option value="bm25">BM25</option><option value="vector">向量</option></select></div><div><label for="rrf">RRF k</label><input id="rrf" type="number" min="1" max="10000" value="60"></div></div>
 <button id="ask">提问</button><p id="status" class="status" aria-live="polite"></p><pre id="answer"></pre><div id="evidence"></div><div id="citations"></div>
 <details><summary>检索与上下文信息</summary><pre id="trace"></pre></details>
 <label for="correction">核对后的正确答案（选填）</label><textarea id="correction"></textarea><label for="comment">反馈说明（选填）</label><textarea id="comment"></textarea><button id="helpful">有帮助</button><button id="unhelpful">需要改进</button><p id="feedback" aria-live="polite"></p>
 </section><p id="error" role="alert"></p><section id="viewer" hidden><h2>原始 PDF</h2><p id="sourceLabel"></p><p id="previewStatus" role="status"></p><a id="downloadSource" hidden>下载原始 PDF</a><img id="pdfPage" hidden alt="引用来源的原始 PDF 页面" style="width:100%;height:auto;margin-top:14px"></section>
+<p><small>资料库界面版本：2026.10.08.4</small></p>
 <script>
 const $ = id => document.getElementById(id);
 let lastAnswer = null, answerKb = null, sourceUrl = null, previewUrl = null;
 let sourceRequest = 0;
 const citationReviews = new Map();
 let uploadAttempt = null, askAttempt = null;
+let creating = false, libraryRequest = 0, documentsRequest = 0;
+let uploading = false, uploadSession = null, currentDocuments = [], documentsKb = '';
+let deleting = false, knowledgeBases = [];
+const selectionKey = 'pdf-inspector.lastKnowledgeBase';
+const suppressDefaultKey = 'pdf-inspector.suppressDefaultKnowledgeBase';
+let defaultCreationSuppressed = false;
+try { defaultCreationSuppressed = localStorage.getItem(suppressDefaultKey) === '1'; } catch { /* Browser storage is optional. */ }
+function suppressDefaultCreation(value) {
+  defaultCreationSuppressed = value;
+  try { if (value) localStorage.setItem(suppressDefaultKey, '1'); else localStorage.removeItem(suppressDefaultKey); } catch { /* Keep the choice for this session. */ }
+}
+function savedSelection() {
+  try { return localStorage.getItem(selectionKey) || ''; } catch { return ''; }
+}
+function rememberSelection(id) {
+  try {
+    if (id) localStorage.setItem(selectionKey, id); else localStorage.removeItem(selectionKey);
+  } catch { /* The server still keeps the documents when browser storage is unavailable. */ }
+}
+function updateDeleteButton() {
+  $('deleteKb').disabled = deleting || creating || uploading || $('connect').disabled || $('ask').disabled || $('helpful').disabled || $('unhelpful').disabled || !knowledgeBases.some(item => item.id === $('kb').value);
+}
+function updateCreateButton() { $('create').disabled = creating || uploading || deleting || !$('name').value.trim(); }
+function updateUploadControls() {
+  const target = currentDocuments.find(item => item.id === $('uploadTarget').value);
+  $('upload').disabled = uploading || deleting || documentsKb !== $('kb').value || !$('kb').value || !$('file').files[0];
+  $('uploadTarget').disabled = uploading || deleting || documentsKb !== $('kb').value;
+  $('file').disabled = uploading || deleting;
+  $('upload').textContent = target ? '更新并保存' : '保存资料';
+  $('uploadHint').textContent = target
+    ? '将更新“' + target.filename + '”。完成后查询新内容，不会新增一份重复资料。'
+    : '选择 PDF 后即可保存；相同内容会自动跳过，无需重复导入。';
+  updateDeleteButton();
+}
+function documentOptions(uploadId = '', scopeId = '') {
+  for (const [id, label, selected] of [['uploadTarget', '新增资料', uploadId], ['documentScope', '当前知识库全部资料', scopeId]]) {
+    const select = $(id), first = document.createElement('option');
+    first.value = ''; first.textContent = label; select.replaceChildren(); select.append(first);
+    for (const item of currentDocuments) {
+      if (id === 'documentScope' && item.status !== 'ready') continue;
+      if (id === 'uploadTarget' && ['queued', 'indexing'].includes(item.status)) continue;
+      const option = document.createElement('option');
+      option.value = item.id; option.textContent = (id === 'uploadTarget' ? '更新：' : '') + item.filename; select.append(option);
+    }
+    select.value = [...select.children].some(option => option.value === selected) ? selected : '';
+  }
+  updateUploadControls();
+}
 function operationHeaders(kind, identity) {
   let attempt = kind === 'upload' ? uploadAttempt : askAttempt;
   if (!attempt || attempt.identity !== identity) attempt = {identity, key: crypto.randomUUID()};
@@ -42,8 +100,23 @@ async function api(path, options = {}) {
   const headers = new Headers(options.headers || {});
   if ($('key').value) headers.set('Authorization', 'Bearer ' + $('key').value);
   if (options.body && !(options.body instanceof FormData)) headers.set('Content-Type', 'application/json');
-  const response = await fetch(path, {...options, headers});
-  if (!response.ok) throw Error(response.status + ' ' + await response.text());
+  let response;
+  try { response = await fetch(path, {...options, headers, cache: 'no-store'}); }
+  catch {
+    throw Error('连接不到本机资料库服务。请启动 PDF资料库.exe，等待启动成功后重新加载。使用期间请保持资料库窗口打开。');
+  }
+  if (!response.ok) {
+    const text = await response.text();
+    let detail;
+    try { detail = JSON.parse(text).detail; } catch { /* Keep non-JSON errors readable. */ }
+    const message = detail === 'knowledge_base_already_exists'
+      ? '已有同名知识库，请从上方选择，或使用其他名称。'
+      : detail === 'cannot delete a knowledge base while indexing is active' ? '此知识库中有资料正在入库，请等待完成后再删除。'
+      : response.status === 403 && options.method === 'DELETE' ? '当前密钥没有删除权限，请使用管理员 API 密钥。'
+      : response.status === 401 ? '请填写有效的 API 密钥，再点击“加载知识库”。'
+      : response.status + ' ' + text;
+    const error = Error(message); error.status = response.status; throw error;
+  }
   return response;
 }
 async function json(path, options) { return (await api(path, options)).json(); }
@@ -54,23 +127,101 @@ function kbPath(id = $('kb').value) {
 async function action(button, work) {
   $('error').textContent = '';
   button.disabled = true;
+  updateDeleteButton();
   try { await work(); }
   catch (error) {
     $('error').textContent = error.message;
     if (button === $('ask')) $('status').textContent = '本次回答失败，请查看错误信息';
-  } finally { button.disabled = false; }
+    if (button === $('connect')) {
+      $('libraryStatus').textContent = '加载失败：' + error.message;
+      if (!$('kb').value) {
+        const option = document.createElement('option');
+        option.value = ''; option.textContent = '未连接，请启动资料库后重试';
+        $('kb').replaceChildren(); $('kb').append(option);
+      }
+    }
+    if (button === $('create')) $('createStatus').textContent = '创建失败：' + error.message;
+    if (button === $('upload')) $('progress').textContent = '保存未完成：' + error.message;
+    if (button === $('deleteKb')) $('deleteStatus').textContent = '删除失败：' + error.message;
+  } finally {
+    button.disabled = false;
+    if (button === $('create')) updateCreateButton();
+    if (button === $('upload')) updateUploadControls();
+    updateDeleteButton();
+  }
 }
-async function load(selected) {
-  const data = await json('/v1/knowledge-bases');
+async function listAll(path) {
+  const items = [];
+  for (let offset = 0; ; offset += 200) {
+    const page = await json(path + '?limit=200&offset=' + offset);
+    items.push(...page.items);
+    if (page.items.length < 200) return items;
+  }
+}
+async function loadDocuments() {
+  const request = ++documentsRequest, id = $('kb').value;
+  const uploadId = $('uploadTarget').value, scopeId = $('documentScope').value;
+  currentDocuments = []; documentsKb = ''; documentOptions();
+  $('documents').replaceChildren();
+  if (!id) { $('documentsStatus').textContent = '选择或创建知识库后，可查看已导入的资料。'; return; }
+  $('documentsStatus').textContent = '正在加载已保存的资料…';
+  try {
+    const items = await listAll(kbPath(id) + '/documents');
+    if (request !== documentsRequest || id !== $('kb').value) return;
+    const statuses = {queued: '等待入库', indexing: '正在入库', ready: '可查询', partial: '部分入库', failed: '入库失败'};
+    currentDocuments = items.filter(item => item.is_current !== false);
+    documentsKb = id;
+    documentOptions(uploadId, scopeId);
+    for (const item of currentDocuments) {
+      const row = document.createElement('li');
+      row.textContent = item.filename + (item.version ? ' · ' + item.version : '') + ' · ' + (statuses[item.status] || item.status) + (item.is_current === false ? ' · 历史版本' : '');
+      const query = document.createElement('button'); query.textContent = '查询此资料'; query.disabled = item.status !== 'ready';
+      query.onclick = () => { $('documentScope').value = item.id; $('question').focus(); $('question').scrollIntoView({behavior: 'smooth'}); };
+      const update = document.createElement('button'); update.textContent = '更新此资料'; update.disabled = ['queued', 'indexing'].includes(item.status);
+      update.onclick = () => { if (uploading || deleting) return; $('uploadTarget').value = item.id; uploadSession = null; updateUploadControls(); $('file').focus(); $('file').scrollIntoView({behavior: 'smooth'}); };
+      row.append(query); row.append(update);
+      $('documents').append(row);
+    }
+    $('documentsStatus').textContent = currentDocuments.length
+      ? '已保存 ' + currentDocuments.length + ' 份资料；可查询的资料无需重新导入。'
+      : '此知识库还没有资料，请在下方上传 PDF。';
+  } catch (error) {
+    if (request === documentsRequest && id === $('kb').value) $('documentsStatus').textContent = '资料列表加载失败，可点击“加载知识库”重试：' + error.message;
+  }
+}
+async function load(selected, {autoCreate = true} = {}) {
+  const request = ++libraryRequest;
+  const preferred = selected || $('kb').value || savedSelection();
+  $('libraryStatus').textContent = '正在加载知识库…';
+  let items = await listAll('/v1/knowledge-bases');
+  if (request !== libraryRequest) return;
+  if (!items.length && autoCreate && !defaultCreationSuppressed) {
+    $('libraryStatus').textContent = '正在建立默认知识库“我的资料”…';
+    try { await json('/v1/knowledge-bases', {method: 'POST', body: JSON.stringify({name: '我的资料'})}); }
+    catch (error) { if (error.status !== 409) throw error; }
+    items = await listAll('/v1/knowledge-bases');
+    if (request !== libraryRequest) return;
+  }
+  knowledgeBases = items;
+  if (items.length) suppressDefaultCreation(false);
+  else if (!autoCreate) suppressDefaultCreation(true);
   $('kb').replaceChildren();
-  for (const item of data.items) {
+  for (const item of items) {
     const option = document.createElement('option');
     option.value = item.id;
     option.textContent = item.name + ' · ' + item.embedding_provider + '/' + item.embedding_model;
     $('kb').append(option);
   }
-  if (selected) $('kb').value = selected;
+  if (!items.length) {
+    const option = document.createElement('option');
+    option.value = ''; option.textContent = '暂无知识库，请在下方创建'; $('kb').append(option);
+  }
+  $('kb').value = items.some(item => item.id === preferred) ? preferred : (items[0]?.id || '');
+  rememberSelection($('kb').value);
+  $('libraryStatus').textContent = items.length ? '已加载 ' + items.length + ' 个知识库，关闭后资料仍会保留。' : '还没有知识库，请输入名称后创建。';
   $('models').textContent = '离线模式提供资料摘录。生成模型由服务端配置。';
+  await loadDocuments();
+  updateDeleteButton();
 }
 async function wait(path, ready, progress) {
   const deadline = Date.now() + 300000;
@@ -78,7 +229,7 @@ async function wait(path, ready, progress) {
     const result = await json(path);
     progress(result);
     if (ready.includes(result.status)) return result;
-    if (result.status === 'failed') throw Error(JSON.stringify(result.error || result));
+    if (['failed', 'partial'].includes(result.status)) throw Error(JSON.stringify(result.error || result));
     await new Promise(resolve => setTimeout(resolve, 1000));
   }
   throw Error('等待超过五分钟，任务仍可在 API 中查询；请勿重复上传。');
@@ -158,23 +309,107 @@ function renderEvidence(result) {
   }
 }
 $('connect').onclick = () => action($('connect'), () => load());
+$('deleteKb').onclick = () => action($('deleteKb'), async () => {
+  if (deleting || uploading || creating) return;
+  const id = $('kb').value, path = kbPath(id);
+  deleting = true;
+  for (const control of ['kb', 'connect', 'key', 'ask', 'helpful', 'unhelpful', 'documentScope']) $(control).disabled = true;
+  updateCreateButton(); updateUploadControls();
+  try {
+    const item = await json(path);
+    if (!window.confirm('确定删除知识库“' + item.name + '”吗？\n包含 ' + item.document_count + ' 份资料，将删除其入库内容、索引和问答记录，无法撤销。\n你电脑上的原始 PDF 文件不受影响。')) {
+      $('deleteStatus').textContent = '已取消删除。'; return;
+    }
+    $('deleteStatus').textContent = '正在删除“' + item.name + '”…';
+    await api(path, {method: 'DELETE'});
+    ++libraryRequest; ++documentsRequest; ++sourceRequest;
+    knowledgeBases = knowledgeBases.filter(base => base.id !== id);
+    if (!knowledgeBases.length) suppressDefaultCreation(true);
+    currentDocuments = []; documentsKb = ''; $('kb').replaceChildren(); $('kb').value = '';
+    rememberSelection(''); documentOptions(); $('documents').replaceChildren();
+    lastAnswer = null; answerKb = null; uploadSession = null; uploadAttempt = null; askAttempt = null; citationReviews.clear();
+    $('file').value = ''; $('viewer').hidden = true; $('downloadSource').hidden = true; $('pdfPage').hidden = true;
+    if (sourceUrl) { URL.revokeObjectURL(sourceUrl); sourceUrl = null; }
+    if (previewUrl) { URL.revokeObjectURL(previewUrl); previewUrl = null; }
+    $('citations').replaceChildren(); $('evidence').replaceChildren();
+    for (const field of ['answer', 'trace', 'status', 'feedback', 'progress', 'createStatus']) $(field).textContent = '';
+    $('question').value = ''; $('comment').value = ''; $('correction').value = '';
+    $('deleteStatus').textContent = '已删除知识库“' + item.name + '”。';
+    try { await load(undefined, {autoCreate: false}); }
+    catch (error) { $('deleteStatus').textContent = '已删除“' + item.name + '”，但列表刷新失败，请点击“加载知识库”重试：' + error.message; }
+  } finally {
+    deleting = false;
+    for (const control of ['kb', 'connect', 'key', 'ask', 'helpful', 'unhelpful', 'documentScope']) $(control).disabled = false;
+    updateCreateButton(); updateUploadControls(); updateDeleteButton();
+  }
+});
+$('kb').onchange = () => { rememberSelection($('kb').value); uploadSession = null; $('progress').textContent = ''; documentOptions(); return loadDocuments(); };
+$('name').oninput = updateCreateButton;
+$('uploadTarget').onchange = () => { uploadSession = null; updateUploadControls(); };
+$('file').onchange = () => { uploadSession = null; updateUploadControls(); };
 $('create').onclick = () => action($('create'), async () => {
-  const kb = await json('/v1/knowledge-bases', {method: 'POST', body: JSON.stringify({name: $('name').value})});
-  await load(kb.id);
+  const name = $('name').value.trim();
+  if (!name) { $('name').focus(); throw Error('请先填写新知识库名称。'); }
+  creating = true;
+  updateDeleteButton();
+  $('createStatus').textContent = '正在创建…';
+  try {
+    const kb = await json('/v1/knowledge-bases', {method: 'POST', body: JSON.stringify({name})});
+    $('name').value = '';
+    suppressDefaultCreation(false);
+    rememberSelection(kb.id);
+    $('createStatus').textContent = '已创建“' + kb.name + '”，可在下方上传资料。';
+    try { await load(kb.id); }
+    catch (error) { $('libraryStatus').textContent = '创建已成功，但列表加载失败，请点击“加载知识库”重试：' + error.message; }
+  } finally { creating = false; }
 });
 $('upload').onclick = () => action($('upload'), async () => {
-  const base = kbPath();
+  const id = $('kb').value, base = kbPath(id);
   const file = $('file').files[0];
   if (!file) throw Error('请选择 PDF');
-  if (!$('documentKey').value.trim()) throw Error('请填写文档标识');
-  const form = new FormData(); form.append('file', file); form.append('profile_id', 'manual_query');
-  const task = await json('/v1/tasks', {method: 'POST', body: form, headers: operationHeaders('upload', file)});
-  $('progress').textContent = '解析任务 ' + task.id;
-  await wait('/v1/tasks/' + task.id, ['ready', 'needs_review'], result => $('progress').textContent = '解析 ' + result.status + ' · ' + task.id);
-  const source = await json(base + '/documents', {method: 'POST', body: JSON.stringify({task_id: task.id, document_key: $('documentKey').value, version: $('version').value})});
-  await wait(base + '/documents/' + source.id, ['ready'], result => $('progress').textContent = '入库 ' + result.status + ' · ' + source.id);
-  $('progress').textContent = '入库完成，可提问。';
-  uploadAttempt = null;
+  if (documentsKb !== id) throw Error('请先加载此知识库的资料列表。');
+  const targetId = $('uploadTarget').value;
+  const target = currentDocuments.find(item => item.id === targetId);
+  if (targetId && !target) throw Error('要更新的资料已变化，请重新加载后选择。');
+  uploading = true; $('kb').disabled = true; $('connect').disabled = true; updateCreateButton(); updateUploadControls();
+  try {
+    $('progress').textContent = '正在检查资料是否已保存…';
+    const digest = await crypto.subtle.digest('SHA-256', await file.arrayBuffer());
+    const hash = Array.from(new Uint8Array(digest), byte => byte.toString(16).padStart(2, '0')).join('');
+    const existing = currentDocuments.find(item => item.content_hash === hash && item.status === 'ready');
+    if (existing) {
+      $('documentScope').value = existing.id;
+      $('progress').textContent = '该文件已保存在“' + existing.filename + '”，无需重复导入，可直接提问。';
+      return;
+    }
+    if (!uploadSession || uploadSession.file !== file || uploadSession.kbId !== id || uploadSession.targetId !== targetId) {
+      uploadSession = {file, kbId: id, targetId, documentKey: target ? target.document_key : crypto.randomUUID(), taskId: null, documentId: null};
+    }
+    const session = uploadSession;
+    if (!session.taskId) {
+      const form = new FormData(); form.append('file', file); form.append('profile_id', 'manual_query');
+      const task = await json('/v1/tasks', {method: 'POST', body: form, headers: operationHeaders('upload', session)});
+      session.taskId = task.id;
+    }
+    await wait('/v1/tasks/' + session.taskId, ['ready', 'needs_review'], result => $('progress').textContent = '正在解析资料：' + result.status);
+    if (!session.documentId) {
+      const source = await json(base + '/documents', {method: 'POST', body: JSON.stringify({task_id: session.taskId, document_key: session.documentKey})});
+      if (target && source.id !== target.id) throw Error('该文件已保存在其他资料或历史版本中，本次没有替换当前资料。请核对已保存的内容。');
+      session.documentId = source.id;
+    }
+    const documentPath = base + '/documents/' + session.documentId;
+    const document = await json(documentPath);
+    if (['failed', 'partial'].includes(document.status)) await json(documentPath + '/retry', {method: 'POST'});
+    await wait(documentPath, ['ready'], result => $('progress').textContent = '正在保存并建立索引：' + result.status);
+    $('progress').textContent = target
+      ? '资料已更新并保存，可查询最新内容。'
+      : '入库完成，原文件、提取内容和搜索索引已保存，可提问。';
+    uploadAttempt = null; uploadSession = null;
+    if (id === $('kb').value) {
+      await loadDocuments();
+      if (currentDocuments.some(item => item.id === session.documentId && item.status === 'ready')) $('documentScope').value = session.documentId;
+    }
+  } finally { uploading = false; $('kb').disabled = false; $('connect').disabled = false; updateCreateButton(); updateUploadControls(); }
 });
 $('ask').onclick = () => action($('ask'), async () => {
   lastAnswer = null; citationReviews.clear();
@@ -183,7 +418,7 @@ $('ask').onclick = () => action($('ask'), async () => {
   $('answer').textContent = ''; $('trace').textContent = ''; $('comment').value = ''; $('correction').value = '';
   $('viewer').hidden = true; $('status').textContent = '正在查询…';
   answerKb = $('kb').value;
-  const body = JSON.stringify({question: $('question').value, retrieval_mode: $('mode').value, rrf_k: Number($('rrf').value), top_k: 5});
+  const body = JSON.stringify({question: $('question').value, document_ids: $('documentScope').value ? [$('documentScope').value] : [], retrieval_mode: $('mode').value, rrf_k: Number($('rrf').value), top_k: 5});
   const result = await json(kbPath(answerKb) + '/ask', {method: 'POST', body, headers: operationHeaders('ask', answerKb + body)});
   askAttempt = null;
   lastAnswer = result;
@@ -205,5 +440,8 @@ async function feedback(helpful) {
 $('helpful').onclick = () => action($('helpful'), () => feedback(true));
 $('unhelpful').onclick = () => action($('unhelpful'), () => feedback(false));
 window.addEventListener('beforeunload', () => { if (sourceUrl) URL.revokeObjectURL(sourceUrl); if (previewUrl) URL.revokeObjectURL(previewUrl); });
+updateCreateButton();
+updateUploadControls();
+action($('connect'), () => load());
 </script>
 </html>
